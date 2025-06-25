@@ -123,7 +123,10 @@ export default function HomeScreen() {
           <Text style={styles.plus}>+</Text>
         </View>
         <Ionicons name="notifications-outline" size={24} color="#9FA5C0" />
-        <FontAwesome name="user" size={24} color="#9FA5C0" />
+       <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+  <FontAwesome name="user" size={24} color="#9FA5C0" />
+</TouchableOpacity>
+
       </View>
     </View>
   );

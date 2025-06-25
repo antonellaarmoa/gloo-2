@@ -4,14 +4,20 @@ import OnboardingScreen from './screens/OnboardingScreen';
 import * as Font from 'expo-font';
 import { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
-import LoginScreen from './screens/LoginScreen';
+
 import HomeScreen from './screens/HomeScreen';
+import ProfileScreen from './screens/ProfileScreen';
+
+import LoginScreen from './screens/LoginScreen';
+
 import CommentScreen from './screens/CommentScreen';
 import RecipeDetailScreen from './screens/RecipeDetailScreen';
 import StepByStepScreen from './screens/StepByStepScreen';
 import FinishScreen from './screens/FinishScreen';
 
 const Stack = createNativeStackNavigator();
+
+
 
 export default function App() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
@@ -41,6 +47,7 @@ export default function App() {
         <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
         <Stack.Screen name="StepByStep" component={StepByStepScreen} />
         <Stack.Screen name="Finish" component={FinishScreen} />
+       <Stack.Screen name="Profile" component={ProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
