@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -6,42 +6,60 @@ import {
   Image,
   TouchableOpacity,
   Dimensions,
+  ScrollView,
 } from 'react-native';
-import RecipeCard from '../components/RecipeCard'; // 🔹 Usamos el componente
+import RecipeCard from '../components/RecipeCard';
+import { useNavigation } from '@react-navigation/native';
+import { Feather } from '@expo/vector-icons';
+
+import MenuModal from '../components/MenuModal';
 
 const { width } = Dimensions.get('window');
 
 export default function ProfileScreen() {
+  const navigation = useNavigation();
+  const [activeTab, setActiveTab] = useState('My Recipes');
+  const [menuVisible, setMenuVisible] = useState(false);
+
   return (
-    <View style={styles.container}>
-      <Image source={require('../assets/user.jpeg')} style={styles.avatar} />
+    <ScrollView style={styles.container} contentContainerStyle={{ alignItems: 'center' }}>
+      
+      {/* Botón de menú arriba a la derecha */}
+      <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+        <Feather name="menu" size={18} color="white" />
+      </TouchableOpacity>
+
+      {/* Componente MenuModal */}
+      <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+
+      <TouchableOpacity onPress={() => navigation.navigate('AccountDetails')}>
+        <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
+      </TouchableOpacity>
 
       <Text style={styles.name}>Anto Armoa</Text>
       <Text style={styles.username}>@anto.armoa</Text>
-
       <Text style={styles.bio}>it's simple</Text>
 
-      <TouchableOpacity style={styles.followButton}>
-        <Text style={styles.followText}>Following</Text>
-      </TouchableOpacity>
-
       <View style={styles.statsContainer}>
-        <View style={styles.statBox}>
+        <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')}>
           <Text style={styles.statNumber}>120</Text>
           <Text style={styles.statLabel}>Recipes</Text>
-        </View>
-        <View style={styles.statBox}>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Following')}>
           <Text style={styles.statNumber}>120</Text>
           <Text style={styles.statLabel}>Following</Text>
-        </View>
-        <View style={styles.statBox}>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers')}>
           <Text style={styles.statNumber}>250</Text>
           <Text style={styles.statLabel}>Followers</Text>
-        </View>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.buttonsContainer}>
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.orangeButton]}
+          onPress={() => navigation.navigate('EditProfile')}
+        >
           <Text style={styles.actionButtonText}>Edit Profile</Text>
         </TouchableOpacity>
 
@@ -50,36 +68,88 @@ export default function ProfileScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 🔹 Sección de recetas usando RecipeCard */}
-      <Text style={styles.sectionTitle}>My Recipes</Text>
-      <RecipeCard
-        recipe={{
-          title: 'CheeseBURGA',
-          description: 'Cheesy and tasty',
-          image: require('../assets/hamburguesa.png'),
-        }}
-      />
-    </View>
+      {/* Solapas */}
+      <View style={styles.tabsContainer}>
+        {['My Recipes', 'Favorites', 'Changed'].map(tab => (
+          <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)}>
+            <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Contenido según solapa */}
+      {activeTab === 'My Recipes' && (
+        <View style={{ flexDirection: 'row', justifyContent: 'center', width: '100%' }}>
+          <RecipeCard
+            recipe={{
+              title: 'CheeseBURGA',
+              description: 'Cheesy and tasty',
+              image: require('../assets/hamburguesa.png'),
+            }}
+          />
+          <RecipeCard
+            recipe={{
+              title: 'French Toast',
+              description: 'Golden, fluffy French toast with a hint of cinnamon and vanilla.',
+              image: require('../assets/french-toast.jpg'),
+            }}
+          />
+        </View>
+      )}
+
+      {activeTab === 'Favorites' && (
+        <View style={{ alignItems: 'center', gap: 16, marginBottom: 20 }}>
+          <View style={styles.favoriteCard}>
+            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+            <Text style={styles.favoriteText}>All Posts</Text>
+          </View>
+
+          <View style={styles.favoriteCard}>
+            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+            <Text style={styles.favoriteText}>Sweet</Text>
+          </View>
+
+          <View style={styles.favoriteCard}>
+            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+            <Text style={styles.favoriteText}>Salty</Text>
+          </View>
+
+          <TouchableOpacity style={styles.createButton}>
+            <Text style={styles.createButtonText}>+ Create Collection</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {activeTab === 'Changed' && (
+        <Text style={styles.placeholderText}>Changed recipes will appear here</Text>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    paddingTop: 80,
+  container: { flex: 1, backgroundColor: '#fff' },
+  menuButton: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    backgroundColor: '#E2773C',
+    padding: 10,
+    borderRadius: 20,
+    zIndex: 10,
   },
   avatar: {
     width: 100,
     height: 100,
     borderRadius: 50,
     marginBottom: 12,
+    marginTop: 80,
   },
   name: {
     fontSize: 20,
     fontWeight: 'bold',
     fontFamily: 'Inter',
+    color: '#E2773C',
   },
   username: {
     fontSize: 14,
@@ -89,22 +159,9 @@ const styles = StyleSheet.create({
   },
   bio: {
     fontSize: 13,
-    fontStyle: 'italic',
     color: '#444',
     fontFamily: 'Inter',
     marginBottom: 12,
-  },
-  followButton: {
-    backgroundColor: '#142E8B',
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginBottom: 24,
-  },
-  followText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontFamily: 'Inter',
   },
   statsContainer: {
     flexDirection: 'row',
@@ -112,9 +169,7 @@ const styles = StyleSheet.create({
     width: '80%',
     marginBottom: 24,
   },
-  statBox: {
-    alignItems: 'center',
-  },
+  statBox: { alignItems: 'center' },
   statNumber: {
     fontSize: 16,
     fontWeight: 'bold',
@@ -138,20 +193,73 @@ const styles = StyleSheet.create({
   shareButton: {
     backgroundColor: '#E2773C',
   },
+  orangeButton: {
+    backgroundColor: '#E2773C',
+  },
   actionButtonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 13,
     fontFamily: 'Inter',
   },
-  sectionTitle: {
+  tabsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  tabText: {
+    fontSize: 13,
+    fontFamily: 'Inter',
+    color: '#888',
+  },
+  activeTab: {
+    color: '#000',
+    borderBottomWidth: 2,
+    borderBottomColor: '#000',
+  },
+  placeholderText: {
+    fontFamily: 'Inter',
+    fontSize: 14,
+    color: '#999',
+    marginTop: 20,
+  },
+  favoriteCard: {
+    width: width * 0.9,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  favoriteImage: {
+    width: '100%',
+    height: 120,
+    resizeMode: 'cover',
+  },
+  favoriteText: {
     fontSize: 16,
     fontWeight: 'bold',
     fontFamily: 'Inter',
-    alignSelf: 'flex-start',
-    marginLeft: 24,
-    marginTop: 20,
-    marginBottom: 10,
-    color: '#142E8B',
+    marginVertical: 10,
+    color: '#E2773C',
+  },
+  createButton: {
+    backgroundColor: '#E2773C',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    marginTop: 10,
+  },
+  createButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
 });
