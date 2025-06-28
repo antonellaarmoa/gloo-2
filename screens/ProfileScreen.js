@@ -11,6 +11,7 @@ import {
 import RecipeCard from '../components/RecipeCard';
 import { useNavigation } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
+import BottomTabBar from '../components/BottomTabBar';
 
 import MenuModal from '../components/MenuModal';
 
@@ -22,108 +23,113 @@ export default function ProfileScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ alignItems: 'center' }}>
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={{ alignItems: 'center', paddingBottom: 100 }}>
+        
+        {/* Botón de menú arriba a la derecha */}
+        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+          <Feather name="menu" size={18} color="white" />
+        </TouchableOpacity>
+
+        {/* Componente MenuModal */}
+        <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+
+        <TouchableOpacity onPress={() => navigation.navigate('AccountDetails')}>
+          <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
+        </TouchableOpacity>
+
+        <Text style={styles.name}>Anto Armoa</Text>
+        <Text style={styles.username}>@anto.armoa</Text>
+        <Text style={styles.bio}>it's simple</Text>
+
+        <View style={styles.statsContainer}>
+          <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')}>
+            <Text style={styles.statNumber}>120</Text>
+            <Text style={styles.statLabel}>Recipes</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Following')}>
+            <Text style={styles.statNumber}>120</Text>
+            <Text style={styles.statLabel}>Following</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers')}>
+            <Text style={styles.statNumber}>250</Text>
+            <Text style={styles.statLabel}>Followers</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.buttonsContainer}>
+          <TouchableOpacity
+            style={[styles.actionButton, styles.orangeButton]}
+            onPress={() => navigation.navigate('EditProfile')}
+          >
+            <Text style={styles.actionButtonText}>Edit Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.actionButton, styles.shareButton]}>
+            <Text style={styles.actionButtonText}>Share Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Solapas */}
+        <View style={styles.tabsContainer}>
+          {['My Recipes', 'Favorites', 'Changed'].map(tab => (
+            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)}>
+              <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* Contenido según solapa */}
+        {activeTab === 'My Recipes' && (
+          <View style={{ flexDirection: 'row', justifyContent: 'center', width: '100%' }}>
+            <RecipeCard
+              recipe={{
+                title: 'CheeseBURGA',
+                description: 'Cheesy and tasty',
+                image: require('../assets/hamburguesa.png'),
+              }}
+            />
+            <RecipeCard
+              recipe={{
+                title: 'French Toast',
+                description: 'Golden, fluffy French toast with a hint of cinnamon and vanilla.',
+                image: require('../assets/french-toast.jpg'),
+              }}
+            />
+          </View>
+        )}
+
+        {activeTab === 'Favorites' && (
+          <View style={{ alignItems: 'center', gap: 16, marginBottom: 20 }}>
+            <View style={styles.favoriteCard}>
+              <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              <Text style={styles.favoriteText}>All Posts</Text>
+            </View>
+
+            <View style={styles.favoriteCard}>
+              <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              <Text style={styles.favoriteText}>Sweet</Text>
+            </View>
+
+            <View style={styles.favoriteCard}>
+              <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              <Text style={styles.favoriteText}>Salty</Text>
+            </View>
+
+            <TouchableOpacity style={styles.createButton}>
+              <Text style={styles.createButtonText}>+ Create Collection</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {activeTab === 'Changed' && (
+          <Text style={styles.placeholderText}>Changed recipes will appear here</Text>
+        )}
+      </ScrollView>
       
-      {/* Botón de menú arriba a la derecha */}
-      <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-        <Feather name="menu" size={18} color="white" />
-      </TouchableOpacity>
-
-      {/* Componente MenuModal */}
-      <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
-
-      <TouchableOpacity onPress={() => navigation.navigate('AccountDetails')}>
-        <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
-      </TouchableOpacity>
-
-      <Text style={styles.name}>Anto Armoa</Text>
-      <Text style={styles.username}>@anto.armoa</Text>
-      <Text style={styles.bio}>it's simple</Text>
-
-      <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')}>
-          <Text style={styles.statNumber}>120</Text>
-          <Text style={styles.statLabel}>Recipes</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Following')}>
-          <Text style={styles.statNumber}>120</Text>
-          <Text style={styles.statLabel}>Following</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers')}>
-          <Text style={styles.statNumber}>250</Text>
-          <Text style={styles.statLabel}>Followers</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.buttonsContainer}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.orangeButton]}
-          onPress={() => navigation.navigate('EditProfile')}
-        >
-          <Text style={styles.actionButtonText}>Edit Profile</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.actionButton, styles.shareButton]}>
-          <Text style={styles.actionButtonText}>Share Profile</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Solapas */}
-      <View style={styles.tabsContainer}>
-        {['My Recipes', 'Favorites', 'Changed'].map(tab => (
-          <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)}>
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {/* Contenido según solapa */}
-      {activeTab === 'My Recipes' && (
-        <View style={{ flexDirection: 'row', justifyContent: 'center', width: '100%' }}>
-          <RecipeCard
-            recipe={{
-              title: 'CheeseBURGA',
-              description: 'Cheesy and tasty',
-              image: require('../assets/hamburguesa.png'),
-            }}
-          />
-          <RecipeCard
-            recipe={{
-              title: 'French Toast',
-              description: 'Golden, fluffy French toast with a hint of cinnamon and vanilla.',
-              image: require('../assets/french-toast.jpg'),
-            }}
-          />
-        </View>
-      )}
-
-      {activeTab === 'Favorites' && (
-        <View style={{ alignItems: 'center', gap: 16, marginBottom: 20 }}>
-          <View style={styles.favoriteCard}>
-            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            <Text style={styles.favoriteText}>All Posts</Text>
-          </View>
-
-          <View style={styles.favoriteCard}>
-            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            <Text style={styles.favoriteText}>Sweet</Text>
-          </View>
-
-          <View style={styles.favoriteCard}>
-            <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            <Text style={styles.favoriteText}>Salty</Text>
-          </View>
-
-          <TouchableOpacity style={styles.createButton}>
-            <Text style={styles.createButtonText}>+ Create Collection</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {activeTab === 'Changed' && (
-        <Text style={styles.placeholderText}>Changed recipes will appear here</Text>
-      )}
-    </ScrollView>
+      {/* BottomTabBar component */}
+      <BottomTabBar />
+    </View>
   );
 }
 
