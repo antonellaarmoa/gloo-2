@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
-export default function FinishScreen({ navigation }) {
+export default function FinishScreen() {
   const [rating, setRating] = useState(0);
+  const router = useRouter();
 
   const handleRate = (value) => {
     setRating(value);
@@ -12,7 +14,14 @@ export default function FinishScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <ConfettiCannon count={200} origin={{ x: -10, y: 0 }} fadeOut={true} />
+      <ConfettiCannon
+        count={120}
+        origin={{ x: -10, y: 0 }}
+        explosionSpeed={400}
+        fallSpeed={3000}
+        fadeOut={true}
+        autoStart
+      />
 
       <Text style={styles.title}>French Toast</Text>
       <Image source={require('../assets/gloo.png')} style={styles.image} />
@@ -38,7 +47,7 @@ export default function FinishScreen({ navigation }) {
 
       <TouchableOpacity
         style={styles.recipesButton}
-        onPress={() => navigation.navigate('Home')}
+        onPress={() => router.push('/home')}
       >
         <Text style={styles.recipesText}>See More Recipes</Text>
       </TouchableOpacity>
@@ -66,8 +75,9 @@ const styles = StyleSheet.create({
     resizeMode: 'contain',
   },
   congrats: {
+    fontFamily: 'DynaPuff',
     fontSize: 18,
-    color: '#E91E63',
+    color: '#DE6E3C',
     fontWeight: 'bold',
     marginVertical: 12,
     textAlign: 'center',

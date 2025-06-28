@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useNavigation } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -12,6 +11,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 
 const commentsData = [
   {
@@ -28,16 +28,17 @@ const commentsData = [
     avatar: require('../assets/user.jpeg'),
     liked: true,
   },
-  // Más comentarios opcionales
 ];
 
 export default function CommentsScreen() {
   const [comments, setComments] = useState(commentsData);
   const [newComment, setNewComment] = useState('');
-  const navigation = useNavigation()
+  const router = useRouter();
+  const { post } = useLocalSearchParams();
+
   const toggleLike = (id) => {
-    setComments((prevComments) =>
-      prevComments.map((comment) =>
+    setComments((prev) =>
+      prev.map((comment) =>
         comment.id === id ? { ...comment, liked: !comment.liked } : comment
       )
     );
@@ -81,7 +82,11 @@ export default function CommentsScreen() {
       keyboardVerticalOffset={90}
     >
       <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={28} color="#142E8B" />
+        </TouchableOpacity>
         <Text style={styles.headerText}>Comments</Text>
+        <View style={{ width: 28 }} />
       </View>
 
       <FlatList
@@ -111,7 +116,7 @@ export default function CommentsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: 'white'
+    backgroundColor: 'white',
   },
   header: {
     paddingTop: 60,
@@ -119,7 +124,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
-    backgroundColor: 'white'
+    backgroundColor: 'white',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerText: {
     fontSize: 20,
@@ -128,7 +136,7 @@ const styles = StyleSheet.create({
   },
   listContainer: {
     paddingHorizontal: 16,
-    paddingBottom: 16
+    paddingBottom: 16,
   },
   commentItem: {
     flexDirection: 'row',
@@ -142,15 +150,15 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   commentContent: {
-    flex: 1
+    flex: 1,
   },
   username: {
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 2
+    marginBottom: 2,
   },
   commentText: {
-    color: '#444'
+    color: '#444',
   },
   inputContainer: {
     flexDirection: 'row',
@@ -158,7 +166,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderTopWidth: 1,
     borderTopColor: '#eee',
-    backgroundColor: 'white'
+    backgroundColor: 'white',
   },
   input: {
     flex: 1,
@@ -167,6 +175,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginRight: 12,
-    fontSize: 14
-  }
+    fontSize: 14,
+  },
 });

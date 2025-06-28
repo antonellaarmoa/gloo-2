@@ -1,34 +1,38 @@
 {
-  "expo": {
-    "name": "MiApp",
-    "scheme": "gloo",
-    "slug": "MiApp",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+    "expo": {
+      "name": "Gloo",
+      "slug": "gloo",
+      "version": "1.0.0",
+      "orientation": "portrait",
+      "icon": "./assets/gloo.png",
+      "scheme": "gloo",
+      "userInterfaceStyle": "light",
+      "splash": {
+        "image": "./assets/background.jpeg",
+        "resizeMode": "contain",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
-    "plugins": [
-      "expo-font",
-      "expo-web-browser"
-    ]
+      "assetBundlePatterns": ["**/*"],
+      "ios": {
+        "supportsTablet": true,
+        "bundleIdentifier": "com.gloo.app"
+      },
+      "android": {
+        "package": "com.gloo.app",
+        "adaptiveIcon": {
+          "foregroundImage": "./assets/gloo.png",
+          "backgroundColor": "#ffffff"
+        }
+      },
+      "web": {
+        "favicon": "./assets/gloo.png"
+      },
+      "extra": {
+        "eas": {
+          "projectId": "your-eas-project-id"
+        }
+      },
+      "plugins": ["expo-router"]
+    }
   }
-}
+  
