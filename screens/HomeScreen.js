@@ -118,7 +118,9 @@ export default function HomeScreen() {
 
       <View style={styles.navBar}>
         <Ionicons name="home" size={24} color="#9FA5C0" />
-        <Feather name="search" size={24} color="#9FA5C0" />
+        <TouchableOpacity onPress={() => navigation.navigate('Search')}>
+  <Feather name="search" size={24} color="#9FA5C0" />
+</TouchableOpacity>
         <View style={styles.addButton}>
           <Text style={styles.plus}>+</Text>
         </View>

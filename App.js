@@ -10,6 +10,7 @@ import CommentScreen from './screens/CommentScreen';
 import RecipeDetailScreen from './screens/RecipeDetailScreen';
 import StepByStepScreen from './screens/StepByStepScreen';
 import FinishScreen from './screens/FinishScreen';
+import SearchScreen from './screens/SearchScreen';
 
 const Stack = createNativeStackNavigator();
 
@@ -41,6 +42,7 @@ export default function App() {
         <Stack.Screen name="RecipeDetail" component={RecipeDetailScreen} />
         <Stack.Screen name="StepByStep" component={StepByStepScreen} />
         <Stack.Screen name="Finish" component={FinishScreen} />
+        <Stack.Screen name="Search" component={SearchScreen}/>
       </Stack.Navigator>
     </NavigationContainer>
   );
