@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   View,
@@ -7,13 +7,21 @@ import {
   StyleSheet,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import LogoutModal from './LogoutModal';
 
 export default function MenuModal({ visible, onClose }) {
   const router = useRouter();
+  const [showLogout, setShowLogout] = useState(false);
+
+  const handleLogout = () => {
+    setShowLogout(false);
+    // Aquí podrías hacer logout y luego navegar:
+    // router.replace('/login');
+  };
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <TouchableOpacity style={styles.overlay} onPress={onClose}>
+      <View style={styles.overlay}>
         <View style={styles.modalContainer}>
           <TouchableOpacity
             onPress={() => {
@@ -38,15 +46,17 @@ export default function MenuModal({ visible, onClose }) {
           <View style={styles.separator} />
 
           <TouchableOpacity
-            onPress={() => {
-              onClose();
-              // Lógica de logout si querés
-            }}
+            onPress={() => setShowLogout(true)}
           >
-            <Text style={styles.logout}>Log out</Text>
+            <Text style={[styles.option, { color: '#E2773C', fontWeight: 'bold' }]}>Log Out</Text>
           </TouchableOpacity>
         </View>
-      </TouchableOpacity>
+        <LogoutModal
+          visible={showLogout}
+          onCancel={() => setShowLogout(false)}
+          onConfirm={handleLogout}
+        />
+      </View>
     </Modal>
   );
 }
@@ -54,36 +64,32 @@ export default function MenuModal({ visible, onClose }) {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    justifyContent: 'flex-start',
-    alignItems: 'flex-end',
-    paddingTop: 70,
-    paddingRight: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-  },
-  modalContainer: {
-    backgroundColor: '#FDFBF7',
-    width: 230,
-    borderRadius: 30,
-    paddingVertical: 24,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  option: {
-    fontSize: 14,
-    fontFamily: 'Inter',
-    fontWeight: 'bold',
-    color: '#000',
-    marginBottom: 12,
+  modalContainer: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: 24,
+    alignItems: 'center',
+    width: 260,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  logout: {
-    fontSize: 14,
+  option: {
+    fontSize: 16,
+    color: '#222',
     fontFamily: 'Inter',
-    fontWeight: 'bold',
-    color: 'red',
+    marginVertical: 10,
   },
   separator: {
-    width: '80%',
     height: 1,
-    backgroundColor: '#E2773C',
-    marginVertical: 10,
+    width: '100%',
+    backgroundColor: '#eee',
+    marginVertical: 8,
   },
 });
