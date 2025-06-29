@@ -1,33 +1,49 @@
 import React, { useState } from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Modal, View, Text, TouchableOpacity, StyleSheet, TouchableWithoutFeedback } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { useRouter } from 'expo-router';
 
 export default function ShareProfileModal({ visible, onClose, profileUrl }) {
   const [copied, setCopied] = useState(false);
+  const router = useRouter();
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(profileUrl);
     setCopied(true);
     setTimeout(() => {
       setCopied(false);
-      onClose();
+      if (onClose) onClose();
     }, 1200);
+  };
+
+  const handleCancel = () => {
+    router.back();
+  };
+
+  const handleBackdropPress = () => {
+    router.back();
   };
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          <Text style={styles.title}>Share Profile</Text>
-          <Text style={styles.link}>{profileUrl}</Text>
-          <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
-            <Text style={styles.copyText}>{copied ? 'Copied!' : 'Copy Link'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+      <TouchableWithoutFeedback onPress={handleBackdropPress}>
+        <View style={styles.overlay}>
+          <TouchableWithoutFeedback>
+            <View style={styles.container}>
+              <Text style={styles.title}>Share Profile</Text>
+              <Text style={styles.link}>{profileUrl}</Text>
+
+              <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
+                <Text style={styles.copyText}>{copied ? 'Copied!' : 'Copy Link'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
         </View>
-      </View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }

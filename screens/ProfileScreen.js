@@ -30,12 +30,10 @@ export default function ProfileScreen() {
   };
 
   const handleEditProfilePress = () => {
-    console.log('Edit Profile button pressed');
     router.push('/edit-profile');
   };
 
   const handleAccountDetailsPress = () => {
-    console.log('Account Details button pressed');
     router.push('/account-details');
   };
 
@@ -93,9 +91,12 @@ export default function ProfileScreen() {
             <Text style={styles.actionButtonText}>Edit Profile</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.actionButton, styles.shareButton]}>
-            <Text style={styles.actionButtonText}>Share Profile</Text>
-          </TouchableOpacity>
+          <TouchableOpacity
+  style={[styles.actionButton, styles.shareButton]}
+  onPress={() => router.push('/shareprofile')}
+>
+  <Text style={styles.actionButtonText}>Share Profile</Text>
+</TouchableOpacity>
         </View>
 
         {/* Solapas */}

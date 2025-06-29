@@ -14,6 +14,7 @@ export default function RootLayout() {
       <Stack.Screen name="following" options={{ headerShown: false }} />
       <Stack.Screen name="edit-profile" options={{ headerShown: false }} />
       <Stack.Screen name="account-details" options={{ headerShown: false }} />
+      <Stack.Screen name="shareprofile" options={{ headerShown: false }} />
       <Stack.Screen name="public-profile" options={{ headerShown: false }} />
     </Stack>
   );

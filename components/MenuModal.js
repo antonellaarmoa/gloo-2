@@ -5,6 +5,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import LogoutModal from './LogoutModal';
@@ -21,42 +22,46 @@ export default function MenuModal({ visible, onClose }) {
 
   return (
     <Modal visible={visible} transparent animationType="fade">
-      <View style={styles.overlay}>
-        <View style={styles.modalContainer}>
-          <TouchableOpacity
-            onPress={() => {
-              onClose();
-              setTimeout(() => router.push('/account-details'), 200);
-            }}
-          >
-            <Text style={styles.option}>Account Details</Text>
-          </TouchableOpacity>
+      <TouchableWithoutFeedback onPress={onClose}>
+        <View style={styles.overlay}>
+          <TouchableWithoutFeedback>
+            <View style={styles.modalContainer}>
+              <TouchableOpacity
+                onPress={() => {
+                  onClose();
+                  setTimeout(() => router.push('/account-details'), 200);
+                }}
+              >
+                <Text style={styles.option}>Account Details</Text>
+              </TouchableOpacity>
 
-          <View style={styles.separator} />
+              <View style={styles.separator} />
 
-          <TouchableOpacity
-            onPress={() => {
-              onClose();
-              setTimeout(() => router.push('/faqc'), 200);
-            }}
-          >
-            <Text style={styles.option}>FAQ Center</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => {
+                  onClose();
+                  setTimeout(() => router.push('/faqc'), 200);
+                }}
+              >
+                <Text style={styles.option}>FAQ Center</Text>
+              </TouchableOpacity>
 
-          <View style={styles.separator} />
+              <View style={styles.separator} />
 
-          <TouchableOpacity
-            onPress={() => setShowLogout(true)}
-          >
-            <Text style={[styles.option, { color: '#E2773C', fontWeight: 'bold' }]}>Log Out</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowLogout(true)}
+              >
+                <Text style={[styles.option, { color: '#E2773C', fontWeight: 'bold' }]}>Log Out</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableWithoutFeedback>
+          <LogoutModal
+            visible={showLogout}
+            onCancel={() => setShowLogout(false)}
+            onConfirm={handleLogout}
+          />
         </View>
-        <LogoutModal
-          visible={showLogout}
-          onCancel={() => setShowLogout(false)}
-          onConfirm={handleLogout}
-        />
-      </View>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
