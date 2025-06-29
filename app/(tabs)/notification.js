@@ -1,0 +1,585 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  Image,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
+  Alert
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '@clerk/clerk-expo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_URL = 'https://gloo-api-production.up.railway.app/api/v1';
+
+// Función helper para hacer peticiones al backend con manejo de errores
+const apiRequest = async (url, options = {}) => {
+  const defaultOptions = {
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+  };
+
+  // Crear un timeout manual para React Native
+  const timeout = 10000; // 10 segundos
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, { 
+      ...defaultOptions, 
+      ...options,
+      signal: controller.signal 
+    });
+    clearTimeout(timeoutId);
+    return { success: true, response, data: await response.json() };
+  } catch (error) {
+    clearTimeout(timeoutId);
+    // Solo logear errores que no sean de red/CORS para evitar spam
+    if (!error.message.includes('Failed to fetch') && error.name !== 'AbortError') {
+      console.error(`API request failed for ${url}:`, error);
+    }
+    return { success: false, error };
+  }
+};
+
+// Funciones para manejar notificaciones localmente
+const saveNotificationsLocally = async (notifications) => {
+  try {
+    await AsyncStorage.setItem('@gloo:notifications', JSON.stringify(notifications));
+  } catch (error) {
+    console.log('Error saving notifications locally:', error);
+  }
+};
+
+const loadNotificationsLocally = async () => {
+  try {
+    const savedNotifications = await AsyncStorage.getItem('@gloo:notifications');
+    return savedNotifications ? JSON.parse(savedNotifications) : [];
+  } catch (error) {
+    console.log('Error loading notifications locally:', error);
+    return [];
+  }
+};
+
+const saveFollowStatesLocally = async (followStates) => {
+  try {
+    await AsyncStorage.setItem('@gloo:followStates', JSON.stringify(followStates));
+  } catch (error) {
+    console.log('Error saving follow states locally:', error);
+  }
+};
+
+const loadFollowStatesLocally = async () => {
+  try {
+    const savedFollowStates = await AsyncStorage.getItem('@gloo:followStates');
+    return savedFollowStates ? JSON.parse(savedFollowStates) : {};
+  } catch (error) {
+    console.log('Error loading follow states locally:', error);
+    return {};
+  }
+};
+
+export default function NotificationScreen() {
+  const { isSignedIn, userId } = useAuth();
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [followStates, setFollowStates] = useState({});
+
+  // Cargar notificaciones del backend
+  const fetchNotifications = async () => {
+    if (!isSignedIn) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // Cargar notificaciones locales primero
+      const localNotifications = await loadNotificationsLocally();
+      const localFollowStates = await loadFollowStatesLocally();
+      
+      if (localNotifications.length > 0) {
+        setNotifications(localNotifications);
+        setFollowStates(localFollowStates);
+      }
+
+      // Intentar sincronizar con el backend
+      const { success, response, data, error } = await apiRequest(`${API_URL}/notifications/${userId}`);
+
+      if (success && response.ok && data.success && data.data.notifications) {
+        const backendNotifications = data.data.notifications.map(notif => ({
+          id: notif.id,
+          type: notif.type,
+          title: notif.title || '',
+          message: notif.message,
+          time: formatTimeAgo(notif.createdAt),
+          read: notif.read,
+          sender: notif.sender,
+          relatedId: notif.relatedId,
+          relatedType: notif.relatedType,
+          // Datos para mostrar en la UI
+          names: notif.sender ? [notif.sender.firstName || notif.sender.username || 'Usuario'] : [],
+          avatar: notif.sender?.imageUrl ? { uri: notif.sender.imageUrl } : require('../../assets/user.jpeg'),
+          image: notif.relatedType === 'recipe' ? require('../../assets/french-toast.jpg') : null,
+          logo: notif.type === 'approval' ? require('../../assets/logo.png') : null,
+          followed: false, // Por defecto
+          userId: notif.sender?.id
+        }));
+        
+        setNotifications(backendNotifications);
+        await saveNotificationsLocally(backendNotifications);
+      } else {
+        console.log('Backend notifications failed, using local data');
+        // Si el backend falla, usar datos locales o mock
+        if (localNotifications.length === 0) {
+          const mockNotifications = getMockNotifications();
+          setNotifications(mockNotifications);
+          await saveNotificationsLocally(mockNotifications);
+        }
+      }
+    } catch (error) {
+      // Manejar específicamente errores de CORS y red de manera silenciosa
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        console.log('Network error (CORS/connection), using local data');
+      } else if (error.name === 'AbortError') {
+        console.log('Request timeout, using local data');
+      } else {
+        console.error('Error fetching notifications:', error);
+      }
+      
+      // Si falla, usar datos locales o mock
+      const localNotifications = await loadNotificationsLocally();
+      if (localNotifications.length === 0) {
+        const mockNotifications = getMockNotifications();
+        setNotifications(mockNotifications);
+        await saveNotificationsLocally(mockNotifications);
+      } else {
+        setNotifications(localNotifications);
+      }
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  // Marcar notificación como leída
+  const markAsRead = async (notificationId) => {
+    if (!isSignedIn) return;
+
+    // Actualizar estado local inmediatamente
+    const updatedNotifications = notifications.map(notif => 
+      notif.id === notificationId 
+        ? { ...notif, read: true }
+        : notif
+    );
+    setNotifications(updatedNotifications);
+    await saveNotificationsLocally(updatedNotifications);
+
+    try {
+      const { success, response } = await apiRequest(`${API_URL}/notifications/${userId}/read`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          notificationIds: [notificationId]
+        }),
+      });
+
+      if (!success || !response.ok) {
+        console.log('Backend sync failed for markAsRead');
+      }
+    } catch (error) {
+      console.error('Error marking notification as read:', error);
+      // No revertir el cambio local - mantener la experiencia offline-first
+    }
+  };
+
+  // Seguir/dejar de seguir usuario
+  const toggleFollow = async (targetUserId, notificationId) => {
+    if (!isSignedIn) return;
+
+    try {
+      const isCurrentlyFollowing = followStates[notificationId];
+      
+      // Actualizar estado local inmediatamente
+      const newFollowStates = {
+        ...followStates,
+        [notificationId]: !isCurrentlyFollowing
+      };
+      setFollowStates(newFollowStates);
+      await saveFollowStatesLocally(newFollowStates);
+
+      const method = isCurrentlyFollowing ? 'DELETE' : 'POST';
+      
+      const { success, response } = await apiRequest(`${API_URL}/users/${targetUserId}/follow`, {
+        method,
+      });
+
+      if (!success || !response.ok) {
+        console.log('Backend sync failed for toggleFollow');
+        // Revertir cambio local si falla
+        const revertedFollowStates = {
+          ...followStates,
+          [notificationId]: isCurrentlyFollowing
+        };
+        setFollowStates(revertedFollowStates);
+        await saveFollowStatesLocally(revertedFollowStates);
+      }
+    } catch (error) {
+      console.error('Error toggling follow:', error);
+      
+      // Manejar errores de red específicamente
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        console.log('Network error for follow action, keeping local state');
+        // No mostrar alerta para errores de red - mantener experiencia offline
+        return;
+      }
+      
+      Alert.alert('Error', 'No se pudo completar la acción');
+    }
+  };
+
+  // Formatear tiempo relativo desde timestamp
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return 'Ahora';
+    
+    const now = new Date();
+    const date = new Date(timestamp);
+    const diffInMinutes = Math.floor((now - date) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Ahora';
+    if (diffInMinutes < 60) return `${diffInMinutes} min`;
+    
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours}h`;
+    
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays < 7) return `${diffInDays}d`;
+    
+    return date.toLocaleDateString();
+  };
+
+  // Datos de ejemplo para cuando no hay backend
+  const getMockNotifications = () => [
+    {
+      id: '1',
+      type: 'approval',
+      title: 'TheGlooTeam',
+      message: 'Your recipe CheeseBURGA has been approved',
+      time: '10 min',
+      image: require('../../assets/french-toast.jpg'),
+      logo: require('../../assets/logo.png'),
+      read: false
+    },
+    {
+      id: '2',
+      type: 'like',
+      names: ['Facundo Potti', 'Nicole Zieman'],
+      message: 'liked your recipe',
+      time: '20 min',
+      image: require('../../assets/french-toast.jpg'),
+      avatar: require('../../assets/user.jpeg'),
+      read: false
+    },
+    {
+      id: '3',
+      type: 'follow',
+      names: ['Facundo Potti'],
+      message: 'now following you',
+      time: '1h',
+      avatar: require('../../assets/user.jpeg'),
+      followed: true,
+      read: false
+    },
+    {
+      id: '4',
+      type: 'like',
+      names: ['Mariana Lopez', 'Daniel Torres'],
+      message: 'liked your recipe',
+      time: '20 min',
+      image: require('../../assets/french-toast.jpg'),
+      avatar: require('../../assets/user.jpeg'),
+      read: true
+    },
+    {
+      id: '5',
+      type: 'follow',
+      names: ['Paulina Cocina'],
+      message: 'now following you',
+      time: '1h',
+      avatar: require('../../assets/user.jpeg'),
+      followed: false,
+      read: false
+    },
+    {
+      id: '6',
+      type: 'follow',
+      names: ['Miriam'],
+      message: 'now following you',
+      time: '1h',
+      avatar: require('../../assets/user.jpeg'),
+      followed: true,
+      read: true
+    }
+  ];
+
+  // Cargar notificaciones al montar el componente
+  useEffect(() => {
+    fetchNotifications();
+  }, [isSignedIn]);
+
+  // Pull to refresh
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchNotifications();
+  };
+
+  const renderItem = ({ item }) => {
+    const isFollowing = followStates[item.id] !== undefined ? followStates[item.id] : item.followed;
+
+    return (
+      <TouchableOpacity 
+        style={[styles.itemContainer, !item.read && styles.unreadItem]} 
+        onPress={() => markAsRead(item.id)}
+      >
+        {item.type === 'approval' ? (
+          <View style={styles.row}>
+            <Image source={item.logo} style={styles.logo} />
+            <View style={styles.textContainer}>
+              <Text style={styles.title}>
+                <Text style={styles.bold}>{item.title}</Text> - Good News!
+              </Text>
+              <Text style={[styles.message, !item.read && styles.unreadText]}>{item.message}</Text>
+              <Text style={styles.time}>{item.time}</Text>
+            </View>
+            <Image source={item.image} style={styles.recipeThumb} />
+            {!item.read && <View style={styles.unreadDot} />}
+          </View>
+        ) : (
+          <View style={styles.row}>
+            <Image source={item.avatar} style={styles.avatar} />
+            <View style={styles.textContainer}>
+              <Text style={[styles.message, !item.read && styles.unreadText]}>
+                <Text style={styles.bold}>{item.names.join(' and ')}</Text> {item.message}
+              </Text>
+              <Text style={styles.time}>{item.time}</Text>
+            </View>
+            {item.image && <Image source={item.image} style={styles.recipeThumb} />}
+            {item.type === 'follow' && (
+              <TouchableOpacity
+                style={[
+                  styles.followBtn,
+                  { backgroundColor: isFollowing ? '#1e3a8a' : '#f97316' }
+                ]}
+                onPress={() => toggleFollow(item.userId || 'user123', item.id)}
+              >
+                <Text style={styles.followText}>
+                  {isFollowing ? 'Following' : 'Follow'}
+                </Text>
+              </TouchableOpacity>
+            )}
+            {!item.read && <View style={styles.unreadDot} />}
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#f97316" />
+          <Text style={styles.loadingText}>Cargando notificaciones...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!isSignedIn) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.guestContainer}>
+          <Ionicons name="notifications-outline" size={64} color="#9ca3af" />
+          <Text style={styles.guestTitle}>Inicia sesión para ver notificaciones</Text>
+          <Text style={styles.guestMessage}>
+            Conecta con otros chefs y recibe notificaciones sobre tus recetas
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <Text style={styles.sectionTitle}>
+        Notificaciones {notifications.filter(n => !n.read).length > 0 && 
+          `(${notifications.filter(n => !n.read).length})`
+        }
+      </Text>
+      <FlatList
+        data={notifications}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 30 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#f97316']}
+            tintColor="#f97316"
+          />
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Ionicons name="notifications-off-outline" size={48} color="#9ca3af" />
+            <Text style={styles.emptyText}>No tienes notificaciones</Text>
+            <Text style={styles.emptySubtext}>Las notificaciones aparecerán aquí</Text>
+          </View>
+        }
+      />
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    backgroundColor: '#fff',
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    fontFamily: 'Inter',
+  },
+  itemContainer: {
+    marginBottom: 24,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logo: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 12,
+  },
+  textContainer: {
+    flex: 1,
+  },
+  bold: {
+    fontWeight: 'bold',
+  },
+  time: {
+    color: '#6b7280',
+    fontSize: 12,
+  },
+  recipeThumb: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  followBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginLeft: 8,
+  },
+  followText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+  },
+  message: {
+    fontSize: 14,
+    fontFamily: 'Inter',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#6b7280',
+    marginTop: 16,
+    fontFamily: 'Inter',
+  },
+  guestContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  guestTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+    fontFamily: 'Inter',
+  },
+  guestMessage: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 24,
+    fontFamily: 'Inter',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  emptyText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginTop: 16,
+    marginBottom: 8,
+    fontFamily: 'Inter',
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+    textAlign: 'center',
+    fontFamily: 'Inter',
+  },
+  unreadItem: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+  },
+  unreadText: {
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  unreadDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#f97316',
+    marginLeft: 8,
+  },
+});

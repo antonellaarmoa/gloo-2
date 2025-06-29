@@ -1,0 +1,1152 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Alert,
+  Modal,
+  ActivityIndicator,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import DraggableFlatList from 'react-native-draggable-flatlist';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAuth } from '@clerk/clerk-expo';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
+
+export default function CreateRecipeScreen() {
+  const router = useRouter();
+  const { isSignedIn, userId } = useAuth();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [prepTime, setPrepTime] = useState('');
+  const [cookTime, setCookTime] = useState('');
+  const [ingredients, setIngredients] = useState([]);
+  const [newIngredient, setNewIngredient] = useState('');
+  const [newAmount, setNewAmount] = useState('');
+  const [newUnit, setNewUnit] = useState('');
+  const [steps, setSteps] = useState([{ key: '1', text: '', media: null }]);
+  const [recipeImage, setRecipeImage] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showGuestOverlay, setShowGuestOverlay] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isEditingExisting, setIsEditingExisting] = useState(false);
+  const [recipeId, setRecipeId] = useState(null);
+
+  // Cargar borrador al abrir la pantalla
+  useEffect(() => {
+    loadDraft();
+  }, []);
+
+  const loadDraft = async () => {
+    try {
+      const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
+      if (draftData) {
+        const recipeData = JSON.parse(draftData);
+        setTitle(recipeData.title || '');
+        setDescription(recipeData.description || '');
+        setPrepTime(recipeData.prepTime || '');
+        setCookTime(recipeData.cookTime || '');
+        setIngredients(recipeData.ingredients || []);
+        setSteps(recipeData.steps || [{ key: '1', text: '', media: null }]);
+        setRecipeImage(recipeData.recipeImage || null);
+        setNewIngredient(recipeData.newIngredient || '');
+        setNewAmount(recipeData.newAmount || '');
+        setNewUnit(recipeData.newUnit || '');
+        // Los borradores son siempre recetas nuevas, no existentes
+        setIsEditingExisting(false);
+        setRecipeId(null);
+      }
+    } catch (error) {
+      console.error('Error loading recipe draft:', error);
+    }
+  };
+
+  const clearDraft = async () => {
+    try {
+      await AsyncStorage.removeItem('@gloo:recipeDraft');
+    } catch (error) {
+      console.error('Error clearing recipe draft:', error);
+    }
+  };
+
+  const deleteRecipeFromBackend = async (id) => {
+    try {
+      const response = await fetch(`${API_URL}/${id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      if (!response.ok) {
+        // fallback local
+        try {
+          const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
+          if (existingRecipes) {
+            const recipes = JSON.parse(existingRecipes);
+            const filteredRecipes = recipes.filter(recipe => recipe.id !== id);
+            await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(filteredRecipes));
+          }
+        } catch (storageError) {
+          console.log('Error removing recipe from local storage:', storageError);
+        }
+        return true;
+      }
+      return true;
+    } catch (error) {
+      console.error('Error deleting recipe:', error);
+      // fallback local
+      try {
+        const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
+        if (existingRecipes) {
+          const recipes = JSON.parse(existingRecipes);
+          const filteredRecipes = recipes.filter(recipe => recipe.id !== id);
+          await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(filteredRecipes));
+        }
+      } catch (storageError) {
+        console.log('Error removing recipe from local storage:', storageError);
+      }
+      return true;
+    }
+  };
+
+  const clearForm = () => {
+    setTitle('');
+    setDescription('');
+    setPrepTime('');
+    setCookTime('');
+    setIngredients([]);
+    setSteps([{ key: '1', text: '', media: null }]);
+    setRecipeImage(null);
+    setNewIngredient('');
+    setNewAmount('');
+    setNewUnit('');
+    setIsEditingExisting(false);
+    setRecipeId(null);
+  };
+
+  // Función para subir imagen al servidor
+  const uploadImage = async (imageUri) => {
+    try {
+      // Por ahora, usamos la URL directa de la imagen
+      // En un entorno de producción, deberías subir la imagen a un servicio como Cloudinary
+      return imageUri;
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      throw error;
+    }
+  };
+
+  // Función para crear la receta en el backend
+  const createRecipe = async (recipeData) => {
+    try {
+      const response = await fetch(`${API_URL}/${userId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(recipeData),
+      });
+      if (!response.ok) {
+        // fallback local
+        const localRecipe = {
+          ...recipeData,
+          id: Date.now().toString(),
+          createdAt: new Date().toISOString(),
+          status: 'draft'
+        };
+        try {
+          const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
+          const recipes = existingRecipes ? JSON.parse(existingRecipes) : [];
+          recipes.push(localRecipe);
+          await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(recipes));
+        } catch (storageError) {
+          console.log('Error saving recipe locally:', storageError);
+        }
+        return localRecipe;
+      }
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Error creating recipe:', error);
+      // fallback local
+      const localRecipe = {
+        ...recipeData,
+        id: Date.now().toString(),
+        createdAt: new Date().toISOString(),
+        status: 'draft'
+      };
+      try {
+        const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
+        const recipes = existingRecipes ? JSON.parse(existingRecipes) : [];
+        recipes.push(localRecipe);
+        await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(recipes));
+      } catch (storageError) {
+        console.log('Error saving recipe locally:', storageError);
+      }
+      return localRecipe;
+    }
+  };
+
+  const pickMedia = async (index = null) => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1,
+    });
+    if (!result.canceled && result.assets?.length > 0) {
+      const uri = result.assets[0].uri;
+      if (index === null) {
+        setRecipeImage(uri);
+      } else {
+        const updatedSteps = [...steps];
+        if (updatedSteps[index]) {
+          updatedSteps[index].media = uri;
+          setSteps(updatedSteps);
+        }
+      }
+    }
+  };
+
+  const addStep = () => {
+    const newStep = {
+      key: `${Date.now()}-${Math.random()}`,
+      text: '',
+      media: null,
+    };
+    setSteps([...steps, newStep]);
+  };
+
+  const removeStep = (stepKey) => {
+    const updatedSteps = steps.filter((step) => step.key !== stepKey);
+    setSteps(updatedSteps);
+  };
+
+  const renderStep = ({ item, drag }) => {
+    const index = steps.findIndex((s) => s.key === item.key);
+    return (
+      <TouchableOpacity
+        onLongPress={drag}
+        style={styles.stepContainer}
+      >
+        <View style={styles.stepHeader}>
+          <Text style={styles.stepNumber}>{index + 1}</Text>
+          <MaterialCommunityIcons name="drag" size={24} color="#9ca3af" />
+        </View>
+        <TextInput
+          style={styles.stepInput}
+          placeholder={`Descripción del paso ${index + 1}`}
+          placeholderTextColor="#9ca3af"
+          multiline
+          value={item.text}
+          onChangeText={(text) => {
+            const updatedSteps = steps.map((s) =>
+              s.key === item.key ? { ...s, text } : s
+            );
+            setSteps(updatedSteps);
+          }}
+        />
+        {item.media && (
+          <Image source={{ uri: item.media }} style={styles.stepImage} />
+        )}
+        <View style={styles.stepButtons}>
+          <TouchableOpacity onPress={() => pickMedia(index)}>
+            <Ionicons name="image-outline" size={24} color="#f97316" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => removeStep(item.key)}>
+            <Ionicons name="trash-outline" size={24} color="#dc2626" />
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const addIngredient = () => {
+    if (newIngredient.trim() && newAmount.trim()) {
+      setIngredients([...ingredients, { 
+        name: newIngredient, 
+        quantity: parseFloat(newAmount) || 1,
+        unit: newUnit || ''
+      }]);
+      setNewIngredient('');
+      setNewAmount('');
+      setNewUnit('');
+    }
+  };
+
+  const handleTryCreate = () => {
+    if (!isSignedIn) {
+      setShowGuestOverlay(true);
+      return false;
+    }
+    return true;
+  };
+
+  const handlePublish = async () => {
+    if (!handleTryCreate()) return;
+
+    // Validar campos requeridos
+    if (!title.trim()) {
+      Alert.alert('Error', 'El título es requerido');
+      return;
+    }
+
+    if (!description.trim()) {
+      Alert.alert('Error', 'La descripción es requerida');
+      return;
+    }
+
+    if (ingredients.length === 0) {
+      Alert.alert('Error', 'Debes agregar al menos un ingrediente');
+      return;
+    }
+
+    const validSteps = steps.filter(step => step.text.trim());
+    if (validSteps.length === 0) {
+      Alert.alert('Error', 'Debes agregar al menos un paso');
+      return;
+    }
+
+    setIsPublishing(true);
+
+    try {
+      // Preparar datos de la receta
+      const recipeData = {
+        title: title.trim(),
+        description: description.trim(),
+        estimatedTime: parseInt(prepTime) + parseInt(cookTime) || 30,
+        servings: 4, // Valor por defecto
+        ingredients: ingredients,
+        instructions: validSteps.map(step => ({
+          step: step.text.trim(),
+          description: step.text.trim(),
+          image: step.media || null
+        })),
+        image: recipeImage || 'https://images.unsplash.com/photo-1612874742237-6526221588e3', // Imagen por defecto
+        userId: userId,
+        createdBy: userId,
+        updatedBy: userId
+      };
+
+      console.log('Creating recipe with data:', recipeData);
+
+      // Crear la receta en el backend
+      const result = await createRecipe(recipeData);
+
+      console.log('Recipe created successfully:', result);
+
+      // Mostrar mensaje de éxito y navegar
+      Alert.alert(
+        "¡Éxito!",
+        "Tu receta ha sido creada y publicada correctamente.",
+        [
+          {
+            text: "Ver mi receta",
+            onPress: () => {
+              router.push('/recipecreated');
+            }
+          },
+          {
+            text: "Crear otra",
+            onPress: () => {
+              // Limpiar formulario
+              setTitle('');
+              setDescription('');
+              setPrepTime('');
+              setCookTime('');
+              setIngredients([]);
+              setSteps([{ key: '1', text: '', media: null }]);
+              setRecipeImage(null);
+              clearDraft();
+            }
+          }
+        ]
+      );
+
+    } catch (error) {
+      console.error('Error publishing recipe:', error);
+      Alert.alert(
+        "Error",
+        "No se pudo publicar la receta. Por favor, intenta nuevamente.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setIsPublishing(false);
+    }
+  };
+
+  const handleDelete = () => {
+    setShowDeleteModal(true);
+  };
+
+  const handleSaveChanges = () => {
+    setShowSaveModal(true);
+  };
+
+  const confirmDelete = async () => {
+    setShowDeleteModal(false);
+    
+    try {
+      if (isEditingExisting && recipeId) {
+        // Es una receta existente - eliminar del backend
+        await deleteRecipeFromBackend(recipeId);
+        Alert.alert(
+          "Receta Eliminada",
+          "La receta ha sido eliminada exitosamente del servidor.",
+          [{ text: "OK", onPress: () => router.back() }]
+        );
+      } else {
+        // Es una receta nueva - solo limpiar formulario y borradores
+        clearForm();
+        await clearDraft();
+        Alert.alert(
+          "Formulario Limpiado",
+          "El formulario ha sido limpiado y los borradores eliminados.",
+          [{ text: "OK", onPress: () => router.back() }]
+        );
+      }
+    } catch (error) {
+      console.error('Error confirming delete:', error);
+      Alert.alert(
+        "Error",
+        "No se pudo completar la operación. Por favor, intenta nuevamente.",
+        [{ text: "OK" }]
+      );
+    }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+  };
+
+  const confirmSave = async () => {
+    setShowSaveModal(false);
+    setIsSavingDraft(true);
+    
+    // Guardar cambios en AsyncStorage
+    try {
+      const recipeData = {
+        title: title.trim(),
+        description: description.trim(),
+        prepTime: prepTime.trim(),
+        cookTime: cookTime.trim(),
+        ingredients: ingredients,
+        steps: steps,
+        recipeImage: recipeImage,
+        newIngredient: newIngredient.trim(),
+        newAmount: newAmount.trim(),
+        newUnit: newUnit.trim(),
+      };
+      await AsyncStorage.setItem('@gloo:recipeDraft', JSON.stringify(recipeData));
+      
+      // Mostrar mensaje de éxito
+      Alert.alert(
+        "¡Borrador Guardado!",
+        "Tu receta se ha guardado como borrador local. Puedes continuar editando o publicar cuando esté lista.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              console.log("Borrador guardado exitosamente");
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      console.error('Error saving recipe draft:', error);
+      Alert.alert(
+        "Error",
+        "No se pudo guardar el borrador. Inténtalo de nuevo.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setIsSavingDraft(false);
+    }
+  };
+
+  const cancelSave = () => {
+    setShowSaveModal(false);
+  };
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 100 }}>
+          <View style={styles.container}>
+            {/* Header */}
+            <View style={styles.headerContainer}>
+              <TouchableOpacity onPress={() => router.back()}>
+                <Ionicons name="chevron-back" size={24} color="#1e293b" />
+              </TouchableOpacity>
+              <View style={styles.headerTitleContainer}>
+                <Text style={styles.headerTitle}>New Recipe</Text>
+                <Text style={styles.headerSubtitle}>Create & share your recipe</Text>
+              </View>
+              <View style={{ width: 24 }} />
+            </View>
+
+            {/* Action Buttons */}
+            <View style={styles.actionButtonsContainer}>
+              <TouchableOpacity 
+                style={[styles.headerBtn, isPublishing && styles.headerBtnDisabled]} 
+                onPress={handlePublish}
+                disabled={isPublishing}
+              >
+                {isPublishing ? (
+                  <View style={styles.publishingContainer}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.headerBtnText}>Publicando...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.headerBtnText}>Publish</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.headerBtn, styles.deleteBtn, isPublishing && styles.headerBtnDisabled]} 
+                onPress={handleDelete}
+                disabled={isPublishing}
+              >
+                <Text style={[styles.headerBtnText, styles.deleteBtnText]}>
+                  {isEditingExisting ? 'Delete' : 'Clear'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Recipe Image */}
+            <TouchableOpacity style={styles.imagePicker} onPress={() => pickMedia(null)}>
+              {recipeImage ? (
+                <Image source={{ uri: recipeImage }} style={styles.recipeImage} />
+              ) : (
+                <View style={styles.imagePlaceholder}>
+                  <Ionicons name="camera-outline" size={48} color="#f97316" />
+                  <Text style={styles.uploadText}>Upload a photo of your recipe</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+
+            {/* Recipe Details */}
+            <TextInput
+              style={styles.inputOrange}
+              placeholder="Recipe Title"
+              placeholderTextColor="#9ca3af"
+              value={title}
+              onChangeText={setTitle}
+            />
+            <TextInput
+              style={styles.textArea}
+              placeholder="Recipe Description"
+              placeholderTextColor="#9ca3af"
+              multiline
+              value={description}
+              onChangeText={setDescription}
+            />
+            <View style={styles.timeContainer}>
+              <TextInput
+                style={styles.timeInput}
+                placeholder="Prep Time (min)"
+                placeholderTextColor="#9ca3af"
+                value={prepTime}
+                onChangeText={setPrepTime}
+                keyboardType="numeric"
+              />
+              <TextInput
+                style={styles.timeInput}
+                placeholder="Cook Time (min)"
+                placeholderTextColor="#9ca3af"
+                value={cookTime}
+                onChangeText={setCookTime}
+                keyboardType="numeric"
+              />
+            </View>
+
+            {/* Ingredients Section */}
+            <Text style={styles.sectionTitle}>Ingredients</Text>
+            {ingredients && ingredients.map((item, i) => (
+              <View key={i} style={styles.ingredientItemContainer}>
+                <View style={styles.ingredientBox}>
+                  <Text style={styles.ingredientText}>{item.quantity} {item.unit}</Text>
+                </View>
+                <View style={styles.ingredientBox}>
+                  <Text style={styles.ingredientText}>{item.name}</Text>
+                </View>
+                <TouchableOpacity onPress={() => {
+                  const updated = ingredients.filter((_, index) => index !== i);
+                  setIngredients(updated);
+                }}>
+                  <Ionicons name="trash-outline" size={20} color="#dc2626" />
+                </TouchableOpacity>
+              </View>
+            ))}
+
+            <View style={styles.ingredientContainer}>
+              <TextInput
+                style={styles.ingredientAmountInput}
+                placeholder="Amount"
+                placeholderTextColor="#9ca3af"
+                value={newAmount}
+                onChangeText={setNewAmount}
+              />
+              <TextInput
+                style={styles.ingredientInput}
+                placeholder="Ingredient name..."
+                placeholderTextColor="#9ca3af"
+                value={newIngredient}
+                onChangeText={setNewIngredient}
+              />
+              <TextInput
+                style={styles.ingredientUnitInput}
+                placeholder="Unit"
+                placeholderTextColor="#9ca3af"
+                value={newUnit}
+                onChangeText={setNewUnit}
+              />
+              <TouchableOpacity style={styles.addIngredientBtn} onPress={addIngredient}>
+                <Ionicons name="add" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Instructions Section */}
+            <Text style={styles.sectionTitle}>Instructions</Text>
+            <DraggableFlatList
+              data={steps}
+              keyExtractor={(item) => item.key}
+              onDragEnd={({ data }) => setSteps(data)}
+              renderItem={renderStep}
+              scrollEnabled={false}
+            />
+
+            <TouchableOpacity style={styles.addStepBtn} onPress={addStep}>
+              <Ionicons name="add-circle-outline" size={24} color="#1e40af" />
+              <Text style={styles.addStepText}>Add Step</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.saveChangesBtn, isSavingDraft && styles.headerBtnDisabled]} 
+              onPress={handleSaveChanges}
+              disabled={isSavingDraft}
+            >
+              {isSavingDraft ? (
+                <View style={styles.publishingContainer}>
+                  <ActivityIndicator size="small" color="#fff" />
+                  <Text style={styles.saveChangesText}>Guardando...</Text>
+                </View>
+              ) : (
+                <Text style={styles.saveChangesText}>Save Changes</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelDelete}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="warning" size={32} color="#dc2626" />
+              <Text style={styles.modalTitle}>
+                {isEditingExisting ? 'Delete Recipe' : 'Clear Form'}
+              </Text>
+            </View>
+            <Text style={styles.modalMessage}>
+              {isEditingExisting 
+                ? 'Are you sure you want to delete this recipe? This action cannot be undone and will remove it from the server.'
+                : 'Are you sure you want to clear the form? This will delete all your current work and drafts.'
+              }
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.cancelButton} onPress={cancelDelete}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmDeleteButton} onPress={confirmDelete}>
+                <Text style={styles.confirmDeleteButtonText}>
+                  {isEditingExisting ? 'Delete' : 'Clear'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Save Changes Confirmation Modal */}
+      <Modal
+        visible={showSaveModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={cancelSave}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Ionicons name="checkmark-circle" size={32} color="#10b981" />
+              <Text style={styles.modalTitle}>Save Changes</Text>
+            </View>
+            <Text style={styles.modalMessage}>
+              ¿Quieres guardar tu receta como borrador local? Podrás continuar editando después.
+            </Text>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity style={styles.continueEditingButton} onPress={cancelSave}>
+                <Text style={styles.continueEditingButtonText}>Continue Editing</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmSaveButton} onPress={confirmSave}>
+                <Text style={styles.confirmSaveButtonText}>Save Changes</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {showGuestOverlay && !isSignedIn && (
+        <View style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.7)',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999
+        }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 32, alignItems: 'center', maxWidth: 320 }}>
+            <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#F9690E', marginBottom: 12, textAlign: 'center' }}>Create an account to add recipes!</Text>
+            <Text style={{ fontSize: 16, color: '#333', marginBottom: 24, textAlign: 'center' }}>
+              Sign up or log in to add, save, comment, and rate recipes. Join our foodie community!
+            </Text>
+            <TouchableOpacity
+              style={{ backgroundColor: '#142E8B', borderRadius: 50, paddingVertical: 12, paddingHorizontal: 32, marginBottom: 12 }}
+              onPress={() => router.replace('/(auth)/sign-in')}
+            >
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign In / Create Account</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowGuestOverlay(false)}>
+              <Text style={{ color: '#F9690E', fontWeight: 'bold', fontSize: 16, marginTop: 8 }}>Continue as Guest</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    backgroundColor: '#ffffff',
+  },
+  stepContainer: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  ingredientContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+    alignItems: 'center',
+  },
+  ingredientItemContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  ingredientText: {
+    fontSize: 14,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1e293b',
+    fontFamily: 'Inter',
+    letterSpacing: 0.2,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#64748b',
+    fontFamily: 'Inter',
+    marginTop: 2,
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    justifyContent: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  headerBtn: {
+    backgroundColor: '#f97316',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerBtnText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  deleteBtn: {
+    backgroundColor: '#dc2626',
+  },
+  deleteBtnText: {
+    color: '#fff',
+  },
+  imagePicker: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 20,
+    height: 200,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#f97316',
+    borderStyle: 'dashed',
+  },
+  addImageText: {
+    fontSize: 48,
+    color: '#f97316',
+  },
+  recipeImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 20,
+  },
+  inputOrange: {
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  textArea: {
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  timeContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  timeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1e293b',
+    fontFamily: 'Inter',
+    marginBottom: 15,
+  },
+  ingredientAmountInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  ingredientInput: {
+    flex: 2,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  ingredientUnitInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+  },
+  addIngredientBtn: {
+    backgroundColor: '#f97316',
+    borderRadius: 10,
+    padding: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ingredientBox: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  stepHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  stepNumber: {
+    backgroundColor: '#f97316',
+    color: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    fontFamily: 'Inter',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  stepInput: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#f97316',
+    padding: 15,
+    marginBottom: 12,
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+    minHeight: 80,
+    textAlignVertical: 'top',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  stepImage: {
+    width: '100%',
+    height: 150,
+    borderRadius: 15,
+    marginBottom: 12,
+  },
+  stepButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+  },
+  addStepBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    borderWidth: 2,
+    borderColor: '#1e40af',
+    borderStyle: 'dashed',
+    borderRadius: 15,
+    padding: 15,
+    marginBottom: 20,
+    gap: 8,
+  },
+  addStepText: {
+    color: '#1e40af',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+  },
+  imagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  uploadText: {
+    fontSize: 16,
+    color: '#9ca3af',
+    fontFamily: 'Inter',
+    marginTop: 12,
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+  saveChangesBtn: {
+    backgroundColor: '#059669',
+    padding: 18,
+    borderRadius: 25,
+    alignItems: 'center',
+    marginVertical: 20,
+    marginHorizontal: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  saveChangesText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: 'Inter',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 20,
+    width: '80%',
+    alignItems: 'center',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    fontFamily: 'Inter',
+    marginLeft: 10,
+  },
+  modalMessage: {
+    fontSize: 16,
+    fontFamily: 'Inter',
+    color: '#1e293b',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  cancelButton: {
+    backgroundColor: '#dc2626',
+    padding: 12,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: '600',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  confirmDeleteButton: {
+    backgroundColor: '#f97316',
+    padding: 12,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeleteButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: '600',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  continueEditingButton: {
+    backgroundColor: '#f97316',
+    padding: 12,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  continueEditingButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: '600',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  confirmSaveButton: {
+    backgroundColor: '#10b981',
+    padding: 12,
+    borderRadius: 20,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmSaveButtonText: {
+    color: '#fff',
+    fontFamily: 'Inter',
+    fontWeight: '600',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  publishingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerBtnDisabled: {
+    backgroundColor: '#ccc',
+    opacity: 0.7,
+  },
+});
