@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import RecipeCard from '../components/RecipeCard';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
@@ -39,13 +39,22 @@ const sampleRecipes = [
   },
 ];
 
-export default function PublicProfileScreen({ route }) {
-  const { user } = route.params;
+export default function PublicProfileScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  let user = params.user;
+  if (typeof user === 'string') {
+    try {
+      user = JSON.parse(user);
+    } catch (e) {
+      user = {};
+    }
+  }
   const [isFollowing, setIsFollowing] = useState(true);
-  const navigation = useNavigation();
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ alignItems: 'center' }}>
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Ionicons name="chevron-back" size={28} color="#E2773C" />
       </TouchableOpacity>
       <Image source={user.avatar} style={styles.avatar} />
@@ -57,11 +66,11 @@ export default function PublicProfileScreen({ route }) {
           <Text style={styles.statNumber}>120</Text>
           <Text style={styles.statLabel}>Recipes</Text>
         </View>
-        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { tab: 'Following', user })}>
+        <TouchableOpacity style={styles.statBox} onPress={() => router.push('/following')}>
           <Text style={styles.statNumber}>120</Text>
           <Text style={styles.statLabel}>Following</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers', { tab: 'Followers', user })}>
+        <TouchableOpacity style={styles.statBox} onPress={() => router.push('/followers')}>
           <Text style={styles.statNumber}>250</Text>
           <Text style={styles.statLabel}>Followers</Text>
         </TouchableOpacity>

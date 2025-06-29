@@ -1,8 +1,32 @@
 import { registerRootComponent } from 'expo';
 import { ExpoRoot } from 'expo-router';
+import React from 'react';
+import * as Font from 'expo-font';
+import { useEffect, useState } from 'react';
+import { View, ActivityIndicator } from 'react-native';
 
-// Must be exported or Fast Refresh won't update the context
-export function App() {
+function App() {
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+
+  useEffect(() => {
+    async function loadFonts() {
+      await Font.loadAsync({
+        'DynaPuff': require('./assets/fonts/DynaPuff.ttf'),
+        'Inter': require('./assets/fonts/Inter.ttf'),
+      });
+      setFontsLoaded(true);
+    }
+    loadFonts();
+  }, []);
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#E2773C" />
+      </View>
+    );
+  }
+
   const ctx = require.context('./app');
   return <ExpoRoot context={ctx} />;
 }

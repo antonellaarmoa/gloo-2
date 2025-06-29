@@ -13,27 +13,33 @@ import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 
+const followersData = [
+  {
+    id: '1',
+    username: '@john_doe',
+    name: 'John Doe',
+    avatar: require('../assets/user.jpeg'),
+    status: 'Following',
+  },
+  {
+    id: '2',
+    username: '@jane_smith',
+    name: 'Jane Smith',
+    avatar: require('../assets/user-ej.png'),
+    status: 'Follow',
+  },
+];
+
 export default function FollowersScreen() {
   const router = useRouter();
-
-  const [followersData, setFollowersData] = useState([
-    { id: '1', username: '@gabi_lopez', name: 'Gabriela Lopez', status: 'Follow', avatar: require('../assets/user-ej.png') },
-    { id: '2', username: '@facu.martinez', name: 'Facundo Martinez', status: 'Following', avatar: require('../assets/user-ej.png') },
-    { id: '3', username: '@tomas_cap', name: 'Tomas Campa', status: 'Follow', avatar: require('../assets/user-ej.png') },
-    { id: '4', username: '@facu.potti', name: 'Facundo Potti', status: 'Following', avatar: require('../assets/user-ej.png') },
-    { id: '5', username: '@gusti_dj', name: 'Gustavo DJ', status: 'Following', avatar: require('../assets/user-ej.png') },
-    { id: '6', username: '@maria_torres', name: 'Maria Torres', status: 'Following', avatar: require('../assets/user-ej.png') },
-    { id: '7', username: '@julian_hernan', name: 'Julian Hernan', status: 'Following', avatar: require('../assets/user-ej.png') },
-    { id: '8', username: '@nicki.zieman', name: 'Nicole Zieman', status: 'Following', avatar: require('../assets/user-ej.png') },
-  ]);
+  const [followers, setFollowers] = useState(followersData);
 
   const toggleFollow = (id) => {
-    const updated = followersData.map(user =>
-      user.id === id
-        ? { ...user, status: user.status === 'Follow' ? 'Following' : 'Follow' }
-        : user
+    setFollowers((prev) =>
+      prev.map((f) =>
+        f.id === id ? { ...f, status: f.status === 'Follow' ? 'Following' : 'Follow' } : f
+      )
     );
-    setFollowersData(updated);
   };
 
   return (
@@ -57,12 +63,12 @@ export default function FollowersScreen() {
       <TextInput placeholder="Search" style={styles.search} />
 
       <FlatList
-        data={followersData}
+        data={followers}
         keyExtractor={item => item.id}
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.followerRow}
-            onPress={() => router.push('/public-profile')}
+            onPress={() => router.push({ pathname: '/public-profile', params: { user: JSON.stringify(item) } })}
           >
             <Image source={item.avatar} style={styles.avatar} />
             <View style={styles.info}>

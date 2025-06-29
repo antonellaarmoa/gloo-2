@@ -10,8 +10,8 @@ export default function FollowingScreen() {
   const router = useRouter();
 
   const [followingData, setFollowingData] = useState([
-    { id: '1', username: '@martuugomez', name: 'Martina Gomez', status: 'Follow', avatar: require('../assets/user.jpeg') },
-    { id: '2', username: '@facu.martinez', name: 'Facundo Martinez', status: 'Following', avatar: require('../assets/user.jpeg') },
+    { id: '1', username: '@john_doe', name: 'John Doe', status: 'Following', avatar: require('../assets/user.jpeg') },
+    { id: '2', username: '@jane_smith', name: 'Jane Smith', status: 'Follow', avatar: require('../assets/user-ej.png') },
     { id: '3', username: '@paulina_cocina', name: 'Paulina Cocina', status: 'Following', avatar: require('../assets/user.jpeg') },
     { id: '4', username: '@facu.potti', name: 'Facundo Potti', status: 'Following', avatar: require('../assets/user.jpeg') },
     { id: '5', username: '@miriam_soñar', name: 'Miriam', status: 'Following', avatar: require('../assets/user.jpeg') },
@@ -54,7 +54,7 @@ export default function FollowingScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.followerRow}
-            onPress={() => router.push('/public-profile')}
+            onPress={() => router.push({ pathname: '/public-profile', params: { user: JSON.stringify(item) } })}
           >
             <Image source={item.avatar} style={styles.avatar} />
             <View style={styles.info}>

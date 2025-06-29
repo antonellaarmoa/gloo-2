@@ -42,7 +42,6 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
       <ScrollView contentContainerStyle={{ alignItems: 'center' }}>
-        
         {/* Botón de menú arriba a la derecha */}
         <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
           <Feather name="menu" size={18} color="white" />
