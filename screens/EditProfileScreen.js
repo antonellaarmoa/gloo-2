@@ -7,6 +7,8 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -18,6 +20,12 @@ export default function EditProfileScreen() {
   const [username, setUsername] = useState('anto.armoa');
   const [presentation, setPresentation] = useState("it's simple ;)");
   const [link, setLink] = useState('');
+  const [showModal, setShowModal] = useState(false);
+
+  const handleSave = () => {
+    setShowModal(true);
+    setTimeout(() => setShowModal(false), 1500);
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
@@ -62,13 +70,28 @@ export default function EditProfileScreen() {
         style={styles.input}
         value={link}
         onChangeText={setLink}
-        placeholder="Link"
+      
         placeholderTextColor="#fff"
       />
 
-      <TouchableOpacity style={styles.saveButton}>
+      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
         <Text style={styles.saveText}>Save Changes</Text>
       </TouchableOpacity>
+
+      <Modal
+        visible={showModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowModal(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setShowModal(false)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.2)', justifyContent: 'center', alignItems: 'center' }}>
+            <View style={{ backgroundColor: '#fff', borderRadius: 20, padding: 32, alignItems: 'center', elevation: 8 }}>
+              <Text style={{ color: '#142E8B', fontWeight: 'bold', fontSize: 16, fontFamily: 'Inter' }}>Profile updated successfully!</Text>
+            </View>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </ScrollView>
   );
 }
@@ -86,10 +109,12 @@ const styles = StyleSheet.create({
     left: 20,
   },
   header: {
-    fontSize: 22,
+    fontSize: 24,
     fontFamily: 'DynaPuff',
+    fontWeight: 'bold',
     color: '#E2773C',
     marginBottom: 20,
+    textAlign: 'center',
   },
   avatar: {
     width: 90,
@@ -99,16 +124,20 @@ const styles = StyleSheet.create({
   },
   editPhoto: {
     fontSize: 14,
-    color: '#888',
+    color: '#E2773C',
     marginBottom: 30,
     fontFamily: 'Inter',
+    fontWeight: '400',
+    textAlign: 'center',
   },
   label: {
     alignSelf: 'flex-start',
     marginLeft: 40,
     marginBottom: 4,
-    fontSize: 13,
+    fontSize: 15,
     fontFamily: 'Inter',
+    fontWeight: 'bold',
+    color: '#222',
   },
   input: {
     width: '80%',
@@ -117,8 +146,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     marginBottom: 20,
-    color: 'white',
+    color: '#444',
     fontFamily: 'Inter',
+    fontWeight: '400',
+    fontSize: 15,
   },
   presentationInput: {
     height: 100,
@@ -134,7 +165,9 @@ const styles = StyleSheet.create({
   saveText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: 'Inter',
+    textTransform: 'none',
+    letterSpacing: 0,
   },
 });

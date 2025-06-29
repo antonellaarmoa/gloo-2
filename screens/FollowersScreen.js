@@ -33,6 +33,7 @@ const followersData = [
 export default function FollowersScreen() {
   const router = useRouter();
   const [followers, setFollowers] = useState(followersData);
+  const [search, setSearch] = useState('');
 
   const toggleFollow = (id) => {
     setFollowers((prev) =>
@@ -42,10 +43,15 @@ export default function FollowersScreen() {
     );
   };
 
+  const filteredFollowers = followers.filter(f =>
+    f.username.toLowerCase().includes(search.toLowerCase()) ||
+    f.name.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
     <View style={styles.container}>
       <TouchableOpacity
-        style={{ position: 'absolute', top: 60, left: 20 }}
+        style={{ position: 'absolute', top: 57, left: 20 }}
         onPress={() => router.back()}
       >
         <Text style={{ fontSize: 24, color: '#E2773C' }}>{'<'}</Text>
@@ -60,38 +66,47 @@ export default function FollowersScreen() {
         <Text style={[styles.tab, styles.activeTab]}>250 Followers</Text>
       </View>
 
-      <TextInput placeholder="Search" style={styles.search} />
-
-      <FlatList
-        data={followers}
-        keyExtractor={item => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.followerRow}
-            onPress={() => router.push({ pathname: '/public-profile', params: { user: JSON.stringify(item) } })}
-          >
-            <Image source={item.avatar} style={styles.avatar} />
-            <View style={styles.info}>
-              <Text style={styles.username}>{item.username}</Text>
-              <Text style={styles.name}>{item.name}</Text>
-            </View>
-            <TouchableOpacity
-              style={styles.followButton}
-              onPress={() => toggleFollow(item.id)}
-            >
-              <Text style={styles.followText}>{item.status}</Text>
-            </TouchableOpacity>
-            <Text style={styles.menuDots}>⋮</Text>
-          </TouchableOpacity>
-        )}
+      <TextInput
+        placeholder="Search"
+        style={styles.search}
+        value={search}
+        onChangeText={setSearch}
       />
+
+      {filteredFollowers.length === 0 ? (
+        <Text style={{ textAlign: 'center', color: '#888', marginTop: 24 }}>Users not found</Text>
+      ) : (
+        <FlatList
+          data={filteredFollowers}
+          keyExtractor={item => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.followerRow}
+              onPress={() => router.push({ pathname: '/public-profile', params: { user: JSON.stringify(item) } })}
+            >
+              <Image source={item.avatar} style={styles.avatar} />
+              <View style={styles.info}>
+                <Text style={styles.username}>{item.username}</Text>
+                <Text style={styles.name}>{item.name}</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.followButton}
+                onPress={() => toggleFollow(item.id)}
+              >
+                <Text style={styles.followText}>{item.status}</Text>
+              </TouchableOpacity>
+              <Text style={styles.menuDots}>⋮</Text>
+            </TouchableOpacity>
+          )}
+        />
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 60, backgroundColor: '#fff', paddingHorizontal: 16 },
-  header: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 12, color: '#E2773C' },
+  container: { flex: 1, paddingTop: 60, backgroundColor: '#fff', paddingHorizontal: 24 },
+  header: { fontSize: 18, fontWeight: 'bold', textAlign: 'center', marginBottom: 24, color: '#E2773C' },
   tabs: { flexDirection: 'row', justifyContent: 'space-around', marginBottom: 16 },
   tab: { fontSize: 14, color: '#888' },
   activeTab: { color: '#142E8B', borderBottomWidth: 2, borderBottomColor: '#142E8B' },
@@ -101,7 +116,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 20,
     color: 'white',
-    fontWeight: 'bold',
+
     marginBottom: 16,
   },
   followerRow: {

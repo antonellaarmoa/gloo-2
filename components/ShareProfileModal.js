@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Modal, View, Text, TouchableOpacity, StyleSheet, TouchableWithoutFeedback } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { useRouter } from 'expo-router';
 
 export default function ShareProfileModal({ visible, onClose, profileUrl }) {
   const [copied, setCopied] = useState(false);
-  const router = useRouter();
+  const copyBtnRef = useRef(null);
+
+  useEffect(() => {
+    if (visible && copyBtnRef.current) {
+      copyBtnRef.current.focus();
+    }
+  }, [visible]);
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(profileUrl);
@@ -17,11 +22,11 @@ export default function ShareProfileModal({ visible, onClose, profileUrl }) {
   };
 
   const handleCancel = () => {
-    router.back();
+    if (onClose) onClose();
   };
 
   const handleBackdropPress = () => {
-    router.back();
+    if (onClose) onClose();
   };
 
   return (
@@ -33,7 +38,13 @@ export default function ShareProfileModal({ visible, onClose, profileUrl }) {
               <Text style={styles.title}>Share Profile</Text>
               <Text style={styles.link}>{profileUrl}</Text>
 
-              <TouchableOpacity style={styles.copyButton} onPress={handleCopy}>
+              <TouchableOpacity
+                ref={copyBtnRef}
+                style={styles.copyButton}
+                onPress={handleCopy}
+                accessible={true}
+                accessibilityLabel="Copy Link"
+              >
                 <Text style={styles.copyText}>{copied ? 'Copied!' : 'Copy Link'}</Text>
               </TouchableOpacity>
 

@@ -58,10 +58,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFBF6', alignItems: 'center', paddingTop: 60 },
   backButton: { position: 'absolute', top: 60, left: 20 },
   header: {
-    fontSize: 22,
+    fontSize: 24,
     fontFamily: 'DynaPuff',
+    fontWeight: 'bold',
     color: '#E2773C',
     marginBottom: 20,
+    textAlign: 'center',
   },
   avatar: {
     width: 90,
@@ -73,8 +75,10 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     marginLeft: 40,
     marginBottom: 4,
-    fontSize: 13,
+    fontSize: 15,
     fontFamily: 'Inter',
+    fontWeight: 'bold',
+    color: '#222',
   },
   input: {
     width: '80%',
@@ -83,8 +87,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     marginBottom: 20,
-    color: 'white',
+    color: '#444',
     fontFamily: 'Inter',
+    fontWeight: '400',
+    fontSize: 15,
   },
   saveButton: {
     backgroundColor: '#142E8B',
@@ -96,7 +102,9 @@ const styles = StyleSheet.create({
   saveText: {
     color: 'white',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: 'Inter',
+    textTransform: 'none',
+    letterSpacing: 0,
   },
 });

@@ -16,14 +16,16 @@ export default function FAQCScreen() {
     <ScrollView style={styles.container}>
       {/* Encabezado con flecha y título */}
       <View style={styles.headerContainer}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={24} color="#000" />
-        </TouchableOpacity>
+        <View style={styles.backButton}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={24} color="#000" />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.header}>FAQ Center</Text>
       </View>
 
       {/* Sección: Account And Profile */}
-      <View style={styles.section}>
+      <View style={styles.card}>
         <Text style={styles.sectionTitle}>Account And Profile</Text>
         {[
           {
@@ -51,7 +53,7 @@ export default function FAQCScreen() {
       <View style={styles.separator} />
 
       {/* Sección: Interaction & Community */}
-      <View style={styles.section}>
+      <View style={styles.card}>
         <Text style={styles.sectionTitle}>Interaction & Community</Text>
         {[
           {
@@ -79,7 +81,7 @@ export default function FAQCScreen() {
       <View style={styles.separator} />
 
       {/* Sección: Search And Discover */}
-      <View style={styles.section}>
+      <View style={styles.card}>
         <Text style={styles.sectionTitle}>Search And Discover</Text>
         {[
           {
@@ -105,38 +107,67 @@ export default function FAQCScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#FFFCF8',
-    paddingHorizontal: 20,
-    paddingTop: 60,
+    flex: 1,
+    backgroundColor: '#fff',
+    paddingHorizontal: 16,
+    paddingTop: 36,
   },
   headerContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    justifyContent: 'center',
+    marginBottom: 18,
+    position: 'relative',
+    minHeight: 32,
+  },
+  backButton: {
+    position: 'absolute',
+    left: 0,
+    zIndex: 2,
+    padding: 4,
   },
   header: {
     fontSize: 20,
     fontFamily: 'DynaPuff',
     color: '#E2773C',
-    marginLeft: 8,
+    textAlign: 'center',
+    flex: 1,
+    fontWeight: 'bold',
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    marginHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 32,
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+    marginBottom: 24,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
   sectionTitle: {
     fontSize: 14,
     fontFamily: 'Inter',
     fontWeight: 'bold',
     color: '#1B1B8A',
-    marginBottom: 12,
+    marginBottom: 10,
+    marginTop: 8,
   },
   qaItem: {
-    marginBottom: 12,
+    marginBottom: 14,
   },
   question: {
     fontSize: 13,
     fontFamily: 'Inter',
     color: '#000',
+    fontWeight: 'bold',
+    marginBottom: 2,
   },
   bold: {
     fontWeight: 'bold',
@@ -145,14 +176,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter',
     color: '#444',
-    marginLeft: 12,
-    marginTop: 4,
+    marginLeft: 16,
+    marginTop: 2,
   },
   separator: {
     height: 2,
-    width: 100,
+    width: 110,
     backgroundColor: '#E2773C',
     alignSelf: 'center',
-    marginVertical: 20,
+    marginVertical: 16,
+    borderRadius: 2,
   },
 });

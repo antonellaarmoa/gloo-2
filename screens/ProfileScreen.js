@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 
 import MenuModal from '../components/MenuModal';
+import ShareProfileModal from '../components/ShareProfileModal';
 
 const { width } = Dimensions.get('window');
 
@@ -20,6 +21,32 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('My Recipes');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [shareModalVisible, setShareModalVisible] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(true); // Ahora controlado por estado
+  const userEmail = 'newuser@email.com';
+
+  if (isNewUser) {
+    return (
+      <View style={styles.container}>
+        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+          <Feather name="menu" size={18} color="white" />
+        </TouchableOpacity>
+        <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+        <View style={{ alignItems: 'center', marginTop: 120 }}>
+          <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
+          <Text style={styles.name}>Welcome!</Text>
+          <Text style={styles.username}>{userEmail}</Text>
+          <Text style={styles.bio}>Complete your profile to get started</Text>
+          <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 24 }]} onPress={() => router.push('/edit-profile')}>
+            <Text style={styles.actionButtonText}>Complete Profile</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionButton, { marginTop: 16 }]} onPress={() => setIsNewUser(false)}>
+            <Text style={styles.actionButtonText}>See Full Profile (demo)</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   const handleFollowingPress = () => {
     router.push('/following');
@@ -39,7 +66,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ alignItems: 'center' }}>
+      <ScrollView contentContainerStyle={{ alignItems: 'center', paddingBottom: 100 }}>
         {/* Botón de menú arriba a la derecha */}
         <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
           <Feather name="menu" size={18} color="white" />
@@ -92,11 +119,11 @@ export default function ProfileScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-  style={[styles.actionButton, styles.shareButton]}
-  onPress={() => router.push('/shareprofile')}
->
-  <Text style={styles.actionButtonText}>Share Profile</Text>
-</TouchableOpacity>
+            style={[styles.actionButton, styles.shareButton]}
+            onPress={() => setShareModalVisible(true)}
+          >
+            <Text style={styles.actionButtonText}>Share Profile</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Solapas */}
@@ -129,22 +156,19 @@ export default function ProfileScreen() {
         )}
 
         {activeTab === 'Favorites' && (
-          <View style={{ alignItems: 'center', gap: 16, marginBottom: 20 }}>
+          <View style={{ alignItems: 'center', gap: 16, marginBottom: 20, width: '100%' }}>
             <View style={styles.favoriteCard}>
               <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
               <Text style={styles.favoriteText}>All Posts</Text>
             </View>
-
             <View style={styles.favoriteCard}>
               <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
               <Text style={styles.favoriteText}>Sweet</Text>
             </View>
-
             <View style={styles.favoriteCard}>
               <Image source={require('../assets/hamburguesa.png')} style={styles.favoriteImage} />
               <Text style={styles.favoriteText}>Salty</Text>
             </View>
-
             <TouchableOpacity style={styles.createButton}>
               <Text style={styles.createButtonText}>+ Create Collection</Text>
             </TouchableOpacity>
@@ -155,6 +179,13 @@ export default function ProfileScreen() {
           <Text style={styles.placeholderText}>Changed recipes will appear here</Text>
         )}
       </ScrollView>
+
+      {/* Componente ShareProfileModal como pop up */}
+      <ShareProfileModal
+        visible={shareModalVisible}
+        onClose={() => setShareModalVisible(false)}
+        profileUrl={'https://gloo.app/u/anto.armoa'}
+      />
     </View>
   );
 }
@@ -290,15 +321,13 @@ const styles = StyleSheet.create({
   },
   createButton: {
     backgroundColor: '#E2773C',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    padding: 12,
     borderRadius: 20,
-    marginTop: 10,
   },
   createButtonText: {
-    color: '#fff',
-    fontFamily: 'Inter',
+    color: 'white',
     fontWeight: 'bold',
-    fontSize: 14,
+    fontSize: 13,
+    fontFamily: 'Inter',
   },
 });

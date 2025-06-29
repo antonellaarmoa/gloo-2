@@ -7,8 +7,8 @@ export default function RecipeCard({ recipe, onPress }) {
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <Image source={recipe.image} style={styles.image} />
-      <Text style={styles.title}>{recipe.title}</Text>
-      <Text style={styles.description}>{recipe.description}</Text>
+      <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">{recipe.title}</Text>
+      <Text style={styles.description} numberOfLines={2} ellipsizeMode="tail">{recipe.description}</Text>
       <View style={styles.footer}>
         <Text style={styles.meta}>⭐ 4</Text>
         <Text style={styles.meta}>⏱ 20min</Text>
@@ -25,6 +25,9 @@ const styles = StyleSheet.create({
     margin: 6,
     padding: 8,
     elevation: 2,
+    minHeight: 190,
+    maxHeight: 190,
+    justifyContent: 'space-between',
   },
   image: {
     width: '100%',
@@ -35,11 +38,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginTop: 6,
     fontFamily: 'Inter',
+    fontSize: 15,
   },
   description: {
     fontSize: 12,
     color: '#666',
     fontFamily: 'Inter',
+    marginTop: 2,
   },
   footer: {
     flexDirection: 'row',
