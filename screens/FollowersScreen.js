@@ -9,12 +9,12 @@ import {
   TouchableOpacity,
   Dimensions
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 
 const { width } = Dimensions.get('window');
 
 export default function FollowersScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const [followersData, setFollowersData] = useState([
     { id: '1', username: '@gabi_lopez', name: 'Gabriela Lopez', status: 'Follow', avatar: require('../assets/user-ej.png') },
@@ -40,7 +40,7 @@ export default function FollowersScreen() {
     <View style={styles.container}>
       <TouchableOpacity
         style={{ position: 'absolute', top: 60, left: 20 }}
-        onPress={() => navigation.navigate('Profile')}
+        onPress={() => router.back()}
       >
         <Text style={{ fontSize: 24, color: '#E2773C' }}>{'<'}</Text>
       </TouchableOpacity>
@@ -48,7 +48,7 @@ export default function FollowersScreen() {
       <Text style={styles.header}>@anto.armoa</Text>
 
       <View style={styles.tabs}>
-        <TouchableOpacity onPress={() => navigation.navigate('Following')}>
+        <TouchableOpacity onPress={() => router.push('/following')}>
           <Text style={styles.tab}>120 Following</Text>
         </TouchableOpacity>
         <Text style={[styles.tab, styles.activeTab]}>250 Followers</Text>
@@ -62,7 +62,7 @@ export default function FollowersScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.followerRow}
-            onPress={() => navigation.navigate('PublicProfile', { user: item })}
+            onPress={() => router.push('/public-profile')}
           >
             <Image source={item.avatar} style={styles.avatar} />
             <View style={styles.info}>

@@ -9,10 +9,10 @@ import {
   ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 
 export default function EditProfileScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const [name, setName] = useState('Anto Armoa');
   const [username, setUsername] = useState('anto.armoa');
@@ -22,7 +22,7 @@ export default function EditProfileScreen() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
     
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Ionicons name="chevron-back" size={24} color="#E2773C" />
       </TouchableOpacity>
 

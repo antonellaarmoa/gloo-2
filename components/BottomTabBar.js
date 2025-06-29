@@ -2,53 +2,56 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter, usePathname } from 'expo-router';
 
 const { height, width } = Dimensions.get('window');
 
 export default function BottomTabBar() {
-  const navigation = useNavigation();
-  const [activeTab, setActiveTab] = useState('profile');
+  const router = useRouter();
+  const pathname = usePathname();
 
   const tabs = [
     {
       name: 'home',
       title: 'Home',
       icon: 'home-outline',
-      screen: 'Home'
+      href: '/(tabs)/home'
     },
     {
       name: 'search',
       title: 'Search',
       icon: 'search-outline',
-      screen: 'Search'
+      href: '/(tabs)/search'
     },
     {
       name: 'create-recipe',
       title: 'Create',
       icon: 'add',
-      screen: 'CreateRecipe',
+      href: '/(tabs)/create-recipe',
       isCreate: true
     },
     {
       name: 'notification',
       title: 'Notifications',
       icon: 'notifications-outline',
-      screen: 'Notifications'
+      href: '/(tabs)/notification'
     },
     {
       name: 'profile',
       title: 'Profile',
       icon: 'person-outline',
-      screen: 'Profile'
+      href: '/(tabs)/profile'
     }
   ];
 
   const handleTabPress = (tab) => {
-    setActiveTab(tab.name);
-    if (tab.screen) {
-      navigation.navigate(tab.screen);
+    if (tab.href) {
+      router.push(tab.href);
     }
+  };
+
+  const isActiveTab = (tab) => {
+    return pathname === tab.href;
   };
 
   return (
@@ -68,11 +71,11 @@ export default function BottomTabBar() {
               <Ionicons 
                 name={tab.icon} 
                 size={24} 
-                color={activeTab === tab.name ? '#f97316' : '#9ca3af'} 
+                color={isActiveTab(tab) ? '#f97316' : '#9ca3af'} 
               />
               <Text style={[
                 styles.tabLabel, 
-                { color: activeTab === tab.name ? '#f97316' : '#9ca3af' }
+                { color: isActiveTab(tab) ? '#f97316' : '#9ca3af' }
               ]}>
                 {tab.title}
               </Text>

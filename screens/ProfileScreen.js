@@ -9,22 +9,39 @@ import {
   ScrollView,
 } from 'react-native';
 import RecipeCard from '../components/RecipeCard';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import BottomTabBar from '../components/BottomTabBar';
 
 import MenuModal from '../components/MenuModal';
 
 const { width } = Dimensions.get('window');
 
 export default function ProfileScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState('My Recipes');
   const [menuVisible, setMenuVisible] = useState(false);
 
+  const handleFollowingPress = () => {
+    router.push('/following');
+  };
+
+  const handleFollowersPress = () => {
+    router.push('/followers');
+  };
+
+  const handleEditProfilePress = () => {
+    console.log('Edit Profile button pressed');
+    router.push('/edit-profile');
+  };
+
+  const handleAccountDetailsPress = () => {
+    console.log('Account Details button pressed');
+    router.push('/account-details');
+  };
+
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={{ alignItems: 'center', paddingBottom: 100 }}>
+      <ScrollView contentContainerStyle={{ alignItems: 'center' }}>
         
         {/* Botón de menú arriba a la derecha */}
         <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
@@ -34,7 +51,7 @@ export default function ProfileScreen() {
         {/* Componente MenuModal */}
         <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
 
-        <TouchableOpacity onPress={() => navigation.navigate('AccountDetails')}>
+        <TouchableOpacity onPress={handleAccountDetailsPress}>
           <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
         </TouchableOpacity>
 
@@ -43,15 +60,27 @@ export default function ProfileScreen() {
         <Text style={styles.bio}>it's simple</Text>
 
         <View style={styles.statsContainer}>
-          <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')}>
+          <TouchableOpacity 
+            style={styles.statBox} 
+            onPress={() => setActiveTab('My Recipes')}
+            activeOpacity={0.7}
+          >
             <Text style={styles.statNumber}>120</Text>
             <Text style={styles.statLabel}>Recipes</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Following')}>
+          <TouchableOpacity 
+            style={styles.statBox} 
+            onPress={handleFollowingPress}
+            activeOpacity={0.7}
+          >
             <Text style={styles.statNumber}>120</Text>
             <Text style={styles.statLabel}>Following</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.statBox} onPress={() => navigation.navigate('Followers')}>
+          <TouchableOpacity 
+            style={styles.statBox} 
+            onPress={handleFollowersPress}
+            activeOpacity={0.7}
+          >
             <Text style={styles.statNumber}>250</Text>
             <Text style={styles.statLabel}>Followers</Text>
           </TouchableOpacity>
@@ -60,7 +89,7 @@ export default function ProfileScreen() {
         <View style={styles.buttonsContainer}>
           <TouchableOpacity
             style={[styles.actionButton, styles.orangeButton]}
-            onPress={() => navigation.navigate('EditProfile')}
+            onPress={handleEditProfilePress}
           >
             <Text style={styles.actionButtonText}>Edit Profile</Text>
           </TouchableOpacity>
@@ -126,9 +155,6 @@ export default function ProfileScreen() {
           <Text style={styles.placeholderText}>Changed recipes will appear here</Text>
         )}
       </ScrollView>
-      
-      {/* BottomTabBar component */}
-      <BottomTabBar />
     </View>
   );
 }
@@ -175,7 +201,14 @@ const styles = StyleSheet.create({
     width: '80%',
     marginBottom: 24,
   },
-  statBox: { alignItems: 'center' },
+  statBox: { 
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    minWidth: 80,
+    minHeight: 50,
+    justifyContent: 'center',
+  },
   statNumber: {
     fontSize: 16,
     fontWeight: 'bold',

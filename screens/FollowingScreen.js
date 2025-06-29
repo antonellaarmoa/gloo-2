@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, FlatList, Image, TouchableOpacity, Dimensions
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 const { width } = Dimensions.get('window');
 
 export default function FollowingScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
 
   const [followingData, setFollowingData] = useState([
     { id: '1', username: '@martuugomez', name: 'Martina Gomez', status: 'Follow', avatar: require('../assets/user.jpeg') },
@@ -33,7 +33,7 @@ export default function FollowingScreen() {
     <View style={styles.container}>
       <TouchableOpacity
         style={{ position: 'absolute', top: 60, left: 20 }}
-        onPress={() => navigation.navigate('Profile')}
+        onPress={() => router.back()}
       >
         <Text style={{ fontSize: 24, color: '#E2773C' }}>{'<'}</Text>
       </TouchableOpacity>
@@ -41,7 +41,7 @@ export default function FollowingScreen() {
       <Text style={styles.header}>@anto.armoa</Text>
       <View style={styles.tabs}>
         <Text style={[styles.tab, styles.activeTab]}>120 Following</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Followers')}>
+        <TouchableOpacity onPress={() => router.push('/followers')}>
           <Text style={styles.tab}>250 Followers</Text>
         </TouchableOpacity>
       </View>
@@ -54,7 +54,7 @@ export default function FollowingScreen() {
         renderItem={({ item }) => (
           <TouchableOpacity
             style={styles.followerRow}
-            onPress={() => navigation.navigate('PublicProfile', { user: item })}
+            onPress={() => router.push('/public-profile')}
           >
             <Image source={item.avatar} style={styles.avatar} />
             <View style={styles.info}>

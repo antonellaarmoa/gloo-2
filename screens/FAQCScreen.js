@@ -6,17 +6,17 @@ import {
   ScrollView,
   TouchableOpacity,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons'; 
-import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
-export default function FAQScreen() {
-  const navigation = useNavigation();
+export default function FAQCScreen() {
+  const router = useRouter();
 
   return (
     <ScrollView style={styles.container}>
       {/* Encabezado con flecha y título */}
       <View style={styles.headerContainer}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={24} color="#000" />
         </TouchableOpacity>
         <Text style={styles.header}>FAQ Center</Text>
@@ -27,19 +27,16 @@ export default function FAQScreen() {
         <Text style={styles.sectionTitle}>Account And Profile</Text>
         {[
           {
-            question: 'How do i create an account?',
-            answer:
-              'You can sign up with your email or use your google/apple account. Just fill in some basic info.',
+            question: 'How do I create an account?',
+            answer: `You can sign up with your email or use your Google/Apple account. Just fill in some basic info.`,
           },
           {
-            question: 'I forgot my password. what should i do?',
-            answer:
-              'On the login screen, tap “forgot your password?” and follow the steps to reset it.',
+            question: 'I forgot my password. What should I do?',
+            answer: `On the login screen, tap "forgot your password?" and follow the steps to reset it.`,
           },
           {
-            question: 'Can i edit my profile?',
-            answer:
-              'Yes. Go to your profile, tap the settings icon, and you can update your name, photo, bio, and more.',
+            question: 'Can I edit my profile?',
+            answer: `Yes. Go to your profile, tap the settings icon, and you can update your name, photo, bio, and more.`,
           },
         ].map((item, index) => (
           <View key={index} style={styles.qaItem}>
@@ -58,19 +55,16 @@ export default function FAQScreen() {
         <Text style={styles.sectionTitle}>Interaction & Community</Text>
         {[
           {
-            question: 'How can i follow other users?',
-            answer:
-              'From their profile, just tap the “follow” button. You’ll see their new recipes on your home feed.',
+            question: 'How can I follow other users?',
+            answer: `From their profile, just tap the "follow" button. You'll see their new recipes on your home feed.`,
           },
           {
-            question: 'Can i comment on or rate recipes?',
-            answer:
-              'Yes! At the bottom of each recipe, you can leave a comment and rate it with stars.',
+            question: 'Can I comment on or rate recipes?',
+            answer: `Yes! At the bottom of each recipe, you can leave a comment and rate it with stars.`,
           },
           {
-            question: 'Can i save recipes to view later?',
-            answer:
-              'Absolutely. Tap the save icon to add them to your favorites or a custom collection.',
+            question: 'Can I save recipes to view later?',
+            answer: `Absolutely. Tap the save icon to add them to your favorites or a custom collection.`,
           },
         ].map((item, index) => (
           <View key={index} style={styles.qaItem}>
@@ -89,14 +83,12 @@ export default function FAQScreen() {
         <Text style={styles.sectionTitle}>Search And Discover</Text>
         {[
           {
-            question: 'How do i find specific recipes?',
-            answer:
-              'Use the search bar to look for recipes by name, ingredient, or category (e.g., “Gluten-Free”, “Quick Meals”, “Desserts”).',
+            question: 'How do I find specific recipes?',
+            answer: `Use the search bar to look for recipes by name, ingredient, or category (e.g., "Gluten-Free", "Quick Meals", "Desserts").`,
           },
           {
-            question: 'Can i search using ingredients i have at home?',
-            answer:
-              'Yes! Use the advanced search to enter ingredients you have, and we’ll show you matching recipes.',
+            question: 'Can I search using ingredients I have at home?',
+            answer: `Yes! Use the advanced search to enter ingredients you have, and we'll show you matching recipes.`,
           },
         ].map((item, index) => (
           <View key={index} style={styles.qaItem}>

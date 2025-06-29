@@ -1,4 +1,3 @@
-// screens/AccountDetailsScreen.js
 import React, { useState } from 'react';
 import {
   View,
@@ -9,26 +8,22 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 
 export default function AccountDetailsScreen() {
-  const navigation = useNavigation();
+  const router = useRouter();
   const [email, setEmail] = useState('anto.armoa@gmail.com');
   const [password, setPassword] = useState('********');
 
   return (
     <View style={styles.container}>
- 
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Ionicons name="chevron-back" size={24} color="#E2773C" />
       </TouchableOpacity>
 
       <Text style={styles.header}>Account Details</Text>
 
-      <Image
-        source={require('../assets/user-ej.png')}
-        style={styles.avatar}
-      />
+      <Image source={require('../assets/user-ej.png')} style={styles.avatar} />
 
       <Text style={styles.label}>Email</Text>
       <TextInput
@@ -49,12 +44,12 @@ export default function AccountDetailsScreen() {
         placeholderTextColor="#fff"
       />
 
-    <TouchableOpacity
-  style={styles.saveButton}
-  onPress={() => navigation.navigate('Profile')}
->
-  <Text style={styles.saveText}>Back to Profile</Text>
-</TouchableOpacity>
+      <TouchableOpacity
+        style={styles.saveButton}
+        onPress={() => router.push('/profile')}
+      >
+        <Text style={styles.saveText}>Back to Profile</Text>
+      </TouchableOpacity>
     </View>
   );
 }

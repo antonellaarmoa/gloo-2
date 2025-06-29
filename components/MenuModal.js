@@ -6,10 +6,10 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 
 export default function MenuModal({ visible, onClose }) {
-  const navigation = useNavigation();
+  const router = useRouter();
 
   return (
     <Modal visible={visible} transparent animationType="fade">
@@ -18,7 +18,7 @@ export default function MenuModal({ visible, onClose }) {
           <TouchableOpacity
             onPress={() => {
               onClose();
-              setTimeout(() => navigation.navigate('AccountDetails'), 200);
+              setTimeout(() => router.push('/account-details'), 200);
             }}
           >
             <Text style={styles.option}>Account Details</Text>
@@ -29,7 +29,7 @@ export default function MenuModal({ visible, onClose }) {
           <TouchableOpacity
             onPress={() => {
               onClose();
-              setTimeout(() => navigation.navigate('FAQC'), 200);
+              setTimeout(() => router.push('/faqc'), 200);
             }}
           >
             <Text style={styles.option}>FAQ Center</Text>
@@ -40,7 +40,7 @@ export default function MenuModal({ visible, onClose }) {
           <TouchableOpacity
             onPress={() => {
               onClose();
-              // Agregá acá la lógica de logout si querés
+              // Lógica de logout si querés
             }}
           >
             <Text style={styles.logout}>Log out</Text>
