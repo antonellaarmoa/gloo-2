@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import DraggableFlatList from 'react-native-draggable-flatlist';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -149,20 +150,52 @@ export default function CreateRecipeScreen() {
     }
   };
 
+  // Función para convertir imagen a base64 (TEMPORALMENTE DESHABILITADA)
+  /*
+  const convertImageToBase64 = async (imageUri) => {
+    try {
+      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+      
+      // Determinar el tipo MIME basado en la extensión del archivo
+      const extension = imageUri.split('.').pop().toLowerCase();
+      let mimeType = 'image/jpeg'; // default
+      
+      if (extension === 'png') {
+        mimeType = 'image/png';
+      } else if (extension === 'gif') {
+        mimeType = 'image/gif';
+      } else if (extension === 'webp') {
+        mimeType = 'image/webp';
+      }
+      
+      return `data:${mimeType};base64,${base64}`;
+    } catch (error) {
+      console.error('Error converting image to base64:', error);
+      return null;
+    }
+  };
+  */
+
   // Función para crear la receta en el backend
   const createRecipe = async (recipeData) => {
     try {
+      // Extraer instrucciones e ingredientes del recipeData
+      const { instructions, ingredients, ...recipeDataWithoutExtras } = recipeData;
+      
       const response = await fetch(`${API_URL}/${userId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(recipeData),
+        body: JSON.stringify(recipeDataWithoutExtras),
       });
+      
       if (!response.ok) {
         // fallback local
         const localRecipe = {
-          ...recipeData,
+          ...recipeDataWithoutExtras,
           id: Date.now().toString(),
           createdAt: new Date().toISOString(),
           status: 'draft'
@@ -177,7 +210,56 @@ export default function CreateRecipeScreen() {
         }
         return localRecipe;
       }
+      
       const result = await response.json();
+      
+      // Si la receta se creó exitosamente, crear ingredientes e instrucciones
+      if (result.success && result.data) {
+        // Crear ingredientes si existen
+        if (ingredients && ingredients.length > 0) {
+          try {
+            const ingredientsResponse = await fetch(`${API_URL.replace('/recipes', '/ingredients')}/${result.data.id}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ ingredients }),
+            });
+            
+            if (ingredientsResponse.ok) {
+              const ingredientsResult = await ingredientsResponse.json();
+              console.log('Ingredients created successfully:', ingredientsResult);
+            } else {
+              console.error('Error creating ingredients:', await ingredientsResponse.text());
+            }
+          } catch (ingredientsError) {
+            console.error('Error creating ingredients:', ingredientsError);
+          }
+        }
+        
+        // Crear instrucciones si existen
+        if (instructions && instructions.length > 0) {
+          try {
+            const instructionsResponse = await fetch(`${API_URL.replace('/recipes', '/instructions')}/${result.data.id}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ instructions }),
+            });
+            
+            if (instructionsResponse.ok) {
+              const instructionsResult = await instructionsResponse.json();
+              console.log('Instructions created successfully:', instructionsResult);
+            } else {
+              console.error('Error creating instructions:', await instructionsResponse.text());
+            }
+          } catch (instructionsError) {
+            console.error('Error creating instructions:', instructionsError);
+          }
+        }
+      }
+      
       return result;
     } catch (error) {
       console.error('Error creating recipe:', error);
@@ -323,19 +405,17 @@ export default function CreateRecipeScreen() {
     setIsPublishing(true);
 
     try {
-      // Preparar datos de la receta
+      // Preparar datos de la receta (sin manejo de imágenes por ahora)
       const recipeData = {
         title: title.trim(),
         description: description.trim(),
         estimatedTime: parseInt(prepTime) + parseInt(cookTime) || 30,
         servings: 4, // Valor por defecto
         ingredients: ingredients,
-        instructions: validSteps.map(step => ({
-          step: step.text.trim(),
+        instructions: validSteps.map((step, index) => ({
+          step: index + 1, // Número del paso
           description: step.text.trim(),
-          image: step.media || null
         })),
-        image: recipeImage || 'https://images.unsplash.com/photo-1612874742237-6526221588e3', // Imagen por defecto
         userId: userId,
         createdBy: userId,
         updatedBy: userId

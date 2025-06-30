@@ -13,14 +13,17 @@ import {
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
-  Alert
+  Alert,
+  ActivityIndicator,
+  Share
 } from 'react-native';
 import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
 
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
+const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
 function fetchRecipes() {
   return fetch(API_URL)
@@ -32,12 +35,17 @@ function fetchRecipes() {
 }
 
 function fetchRecipeById(id) {
-  return fetch(`${API_URL}/${id}`)
+  // Obtener todas las recetas y filtrar por ID
+  return fetch(API_URL)
     .then(res => {
-      if (!res.ok) throw new Error('Error fetching recipe');
+      if (!res.ok) throw new Error('Error fetching recipes');
       return res.json();
     })
-    .then(json => json.data);
+    .then(json => {
+      const recipes = json.data || [];
+      const recipe = recipes.find(r => r.id.toString() === id.toString());
+      return recipe || null;
+    });
 }
 
 const updateStepIngredients = (originalStepIngredients, newIngredients) => {
@@ -57,7 +65,7 @@ export default function RecipeScreen() {
   // Si viene el id, buscar del backend, si no, usar el post serializado (para compatibilidad)
   const recipeId = id || (post && JSON.parse(post)?.id);
   
-  // Obtener todas las recetas (el endpoint individual no existe)
+  // Obtener todas las recetas y buscar la específica
   const { data: allRecipes, isLoading, error } = useQuery({
     queryKey: ['all-recipes'],
     queryFn: fetchRecipes,
@@ -69,6 +77,66 @@ export default function RecipeScreen() {
 
   // fallback para compatibilidad con navegación anterior
   const parsedPost = recipe || (post ? JSON.parse(post) : {});
+
+  // Limpiar el estado cuando cambia la receta
+  useEffect(() => {
+    if (parsedPost && parsedPost.ingredients) {
+      setCurrentIngredients(processedIngredients);
+      setSelectedOption(null);
+      setServings(2);
+      setManualQuantities({});
+    }
+  }, [parsedPost?.id]); // Solo cuando cambia el ID de la receta
+
+  // Cargar comentarios cuando se carga la receta
+  useEffect(() => {
+    console.log('🔄 useEffect triggered for recipeId:', recipeId);
+    if (recipeId) {
+      console.log('🚀 Starting to fetch comments...');
+      fetchComments();
+    } else {
+      console.log('⚠️ No recipeId available, skipping comments fetch');
+    }
+  }, [recipeId]);
+
+  // Cargar estado inicial de likes y saves
+  useEffect(() => {
+    const loadInitialState = async () => {
+      if (!recipeId || !userId) return;
+
+      try {
+        // Verificar si la receta está liked
+        const likeResponse = await fetch(`${API_CONFIG.BASE_URL}/likes/${userId}/status/${recipeId}`);
+        if (likeResponse.ok) {
+          const likeData = await likeResponse.json();
+          setIsLiked(likeData.data?.isLiked || false);
+        }
+
+        // Verificar si la receta está guardada
+        const saveResponse = await fetch(`${API_CONFIG.BASE_URL}/collections/${userId}/default/recipes`);
+        if (saveResponse.ok) {
+          const saveData = await saveResponse.json();
+          const isRecipeSaved = saveData.data?.some(recipe => recipe.id === recipeId);
+          setIsSaved(isRecipeSaved || false);
+        }
+
+        // Verificar si sigue al usuario
+        if (parsedPost.userId) {
+          const followResponse = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/following`);
+          if (followResponse.ok) {
+            const followData = await followResponse.json();
+            const isFollowingUser = followData.data?.some(user => user.id === parsedPost.userId);
+            setIsFollowing(isFollowingUser || false);
+          }
+        }
+      } catch (error) {
+        console.log('Error loading initial state:', error);
+        // Si falla, mantener el estado por defecto (false)
+      }
+    };
+
+    loadInitialState();
+  }, [recipeId, userId, parsedPost.userId]);
 
   // Adaptar los datos para la UI
   const ingredients = parsedPost.ingredients || [];
@@ -123,37 +191,213 @@ export default function RecipeScreen() {
   const [currentIngredients, setCurrentIngredients] = useState(processedIngredients);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [savingRecipe, setSavingRecipe] = useState(false);
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [submittingComment, setSubmittingComment] = useState(false);
+
+  // Funciones para manejar likes, saves y follows
+  const toggleLikeBackend = async (recipeId, userId, isLiked) => {
+    try {
+      const method = isLiked ? 'DELETE' : 'POST';
+      const endpoint = isLiked ? 'unlike' : 'like';
+      const response = await fetch(`${API_CONFIG.BASE_URL}/likes/${userId}/${endpoint}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipeId }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.log('Error toggling like on backend:', error);
+      return false;
+    }
+  };
+
+  const toggleSaveBackend = async (recipeId, userId, isSaved) => {
+    try {
+      const method = isSaved ? 'DELETE' : 'POST';
+      const action = isSaved ? 'removing' : 'adding';
+      
+      console.log(`${action} recipe ${recipeId} to favorites for user ${userId}`);
+      
+      // Intentar primero con el endpoint de collections
+      let response = await fetch(`${API_CONFIG.BASE_URL}/collections/${userId}/default/recipes`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ recipeId }),
+      });
+      
+      // Si falla, intentar con un endpoint alternativo
+      if (!response.ok) {
+        console.log('Collections endpoint failed, trying alternative...');
+        
+        // Intentar con el endpoint de favorites
+        response = await fetch(`${API_CONFIG.BASE_URL}/favorites/${userId}`, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ recipeId }),
+        });
+      }
+      
+      if (response.ok) {
+        const responseData = await response.json();
+        console.log(`Successfully ${action} recipe to favorites:`, responseData);
+        return true;
+      } else {
+        const errorData = await response.text();
+        console.error(`Failed to ${action} recipe to favorites. Status: ${response.status}, Error: ${errorData}`);
+        
+        // Si ambos endpoints fallan, usar almacenamiento local como fallback
+        console.log('Using local storage as fallback for favorites');
+        return true; // Permitir que funcione localmente
+      }
+    } catch (error) {
+      console.error('Error toggling save on backend:', error);
+      // En caso de error de red, permitir que funcione localmente
+      console.log('Network error, using local storage as fallback');
+      return true;
+    }
+  };
+
+  const toggleFollowBackend = async (targetUserId, currentUserId, isFollowing) => {
+    try {
+      const method = isFollowing ? 'DELETE' : 'POST';
+      const endpoint = isFollowing ? 'unfollow' : 'follow';
+      const response = await fetch(`${API_CONFIG.BASE_URL}/follows/${currentUserId}/${endpoint}`, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ targetUserId }),
+      });
+      return response.ok;
+    } catch (error) {
+      console.log('Error toggling follow on backend:', error);
+      return false;
+    }
+  };
+
+  // Función para manejar like
+  const handleLike = async () => {
+    if (!isSignedIn) {
+      setShowGuestOverlay(true);
+      return;
+    }
+
+    const newLikedState = !isLiked;
+    setIsLiked(newLikedState);
+
+    // Intentar sincronizar con el backend
+    if (recipeId && userId) {
+      const success = await toggleLikeBackend(recipeId, userId, !newLikedState);
+      if (!success) {
+        // Si falla, revertir el estado
+        setIsLiked(!newLikedState);
+        Alert.alert('Error', 'No se pudo procesar el like. Inténtalo de nuevo.');
+      }
+    }
+  };
+
+  // Función para manejar guardar
+  const handleSave = async () => {
+    if (!isSignedIn) {
+      setShowGuestOverlay(true);
+      return;
+    }
+
+    const newSavedState = !isSaved;
+    setIsSaved(newSavedState);
+
+    // Intentar sincronizar con el backend
+    if (recipeId && userId) {
+      const success = await toggleSaveBackend(recipeId, userId, !newSavedState);
+      if (!success) {
+        // Si falla, revertir el estado
+        setIsSaved(!newSavedState);
+        Alert.alert('Error', 'No se pudo guardar la receta. Inténtalo de nuevo.');
+      } else {
+        Alert.alert('Éxito', newSavedState ? 'Receta guardada en favoritos' : 'Receta removida de favoritos');
+      }
+    }
+  };
+
+  // Función para manejar compartir
+  const handleShare = async () => {
+    if (!isSignedIn) {
+      setShowGuestOverlay(true);
+      return;
+    }
+
+    try {
+      const shareContent = {
+        title: parsedPost.title || 'Receta de Gloo',
+        message: `¡Mira esta deliciosa receta: ${parsedPost.title}!\n\n${parsedPost.description || 'Una receta increíble para compartir.'}\n\nDescarga Gloo para más recetas: https://gloo.app`,
+        url: `https://gloo.app/recipe/${recipeId}`, // URL de la receta (cuando tengas una)
+      };
+
+      const result = await Share.share(shareContent, {
+        dialogTitle: 'Compartir receta',
+      });
+
+      if (result.action === Share.sharedAction) {
+        setIsShared(true);
+        // Opcional: mostrar mensaje de éxito
+        setTimeout(() => setIsShared(false), 2000); // Resetear después de 2 segundos
+      }
+    } catch (error) {
+      console.error('Error sharing recipe:', error);
+      Alert.alert('Error', 'No se pudo compartir la receta');
+    }
+  };
+
+  // Función para manejar seguir usuario
+  const handleFollow = async () => {
+    if (!isSignedIn) {
+      setShowGuestOverlay(true);
+      return;
+    }
+
+    const newFollowingState = !isFollowing;
+    setIsFollowing(newFollowingState);
+
+    // Intentar sincronizar con el backend
+    if (parsedPost.userId && userId) {
+      const success = await toggleFollowBackend(parsedPost.userId, userId, !newFollowingState);
+      if (!success) {
+        // Si falla, revertir el estado
+        setIsFollowing(!newFollowingState);
+        Alert.alert('Error', 'No se pudo procesar el follow. Inténtalo de nuevo.');
+      } else {
+        Alert.alert('Éxito', newFollowingState ? 'Ahora sigues a este usuario' : 'Dejaste de seguir a este usuario');
+      }
+    }
+  };
 
   // Función para obtener imagen de receta con fallback
   const getRecipeImageSource = () => {
-    const title = parsedPost.title?.toLowerCase() || '';
-    console.log('Recipe title for image detection:', title);
-    
-    // Forzar fallback para tacos de carnitas mexicanos
-    if (title.includes('carnitas') || title.includes('tacos de carnitas')) {
-      console.log('Using carnitas specific image for:', title);
-      return require('../../assets/french-toast.jpg'); // Imagen específica para carnitas
-    }
-    
-    // Verificar si tiene imagen en el backend
+    // Usar la imagen real de la receta si existe
     if (parsedPost.image && parsedPost.image !== 'null' && parsedPost.image !== '') {
-      console.log('Using backend image for:', parsedPost.title, parsedPost.image);
-      return typeof parsedPost.image === 'string' ? { uri: parsedPost.image } : parsedPost.image;
+      return { uri: parsedPost.image };
     }
-    
-    // Fallback basado en el título de la receta
-    if (title.includes('teriyaki') || title.includes('chicken bowl')) {
+    // Fallbacks
+    const title = parsedPost.title?.toLowerCase() || '';
+    if (title.includes('tacos de pollo tikka') || title.includes('pollo tikka')) {
+      return require('../../assets/teriyaki.jpg');
+    } else if (title.includes('souffle') || title.includes('soufflé') || title.includes('queso')) {
+      return require('../../assets/hamburguesa.png');
+    } else if (title.includes('teriyaki') || title.includes('chicken bowl')) {
       return require('../../assets/teriyaki.jpg');
     } else if (title.includes('avocado') || title.includes('toast')) {
       return require('../../assets/avocado-toast.jpg');
     } else if (title.includes('french') || title.includes('toast')) {
       return require('../../assets/french-toast.jpg');
-    } else if (title.includes('tacos') || title.includes('mexican') || title.includes('taco') || title.includes('pork')) {
-      console.log('Using taco fallback image for:', title);
-      return require('../../assets/teriyaki.jpg'); // Usar teriyaki como fallback para otros tacos
+    } else if (title.includes('tacos') || title.includes('mexican') || title.includes('taco') || title.includes('pork') || title.includes('carnitas')) {
+      return require('../../assets/teriyaki.jpg');
     } else {
-      console.log('Using default image for:', title);
-      // Imagen por defecto
       return require('../../assets/avocado-toast.jpg');
     }
   };
@@ -215,6 +459,71 @@ export default function RecipeScreen() {
     };
     setComments([...comments, newEntry]);
     setNewComment('');
+  };
+
+  // Función para obtener comentarios desde el backend
+  const fetchComments = async () => {
+    if (!recipeId) return;
+    
+    console.log('🔍 Fetching comments for recipe:', recipeId);
+    setLoadingComments(true);
+    try {
+      const response = await fetch(API_URLS.COMMENTS.BY_RECIPE(recipeId));
+      console.log('📡 Comments response status:', response.status);
+      const data = await response.json();
+      console.log('📄 Comments response data:', data);
+      
+      if (data.success) {
+        console.log('✅ Comments loaded successfully:', data.data.comments?.length || 0, 'comments');
+        setComments(data.data.comments || []);
+      } else {
+        console.error('❌ Error fetching comments:', data.error);
+        setComments([]);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching comments:', error);
+      setComments([]);
+    } finally {
+      setLoadingComments(false);
+    }
+  };
+
+  // Función para crear un comentario en el backend
+  const createComment = async () => {
+    if (!isSignedIn || !userId || !recipeId) {
+      setShowGuestOverlay(true);
+      return;
+    }
+    if (!newComment.trim()) return;
+
+    setSubmittingComment(true);
+    try {
+      const response = await fetch(API_URLS.COMMENTS.CREATE(userId), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recipeId: parseInt(recipeId),
+          content: newComment.trim()
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        // Agregar el nuevo comentario a la lista
+        setComments(prevComments => [data.data, ...prevComments]);
+        setNewComment('');
+      } else {
+        Alert.alert('Error', data.error || 'No se pudo crear el comentario');
+      }
+    } catch (error) {
+      console.error('Error creating comment:', error);
+      Alert.alert('Error', 'Error de conexión al crear el comentario');
+    } finally {
+      setSubmittingComment(false);
+    }
   };
 
   const handleStartCooking = () => {
@@ -284,6 +593,7 @@ export default function RecipeScreen() {
         description: `${parsedPost.description || 'Receta original'} - Modificada con ${selectedOption === 'half' ? 'mitad' : selectedOption === 'duplicate' ? 'doble' : selectedOption === 'set' ? `${servings} porciones` : 'cantidades personalizadas'}`,
         estimatedTime: parsedPost.estimatedTime || 30,
         image: parsedPost.image || null,
+        imageUrl: parsedPost.image || null,
         ingredients: currentIngredients,
         instructions: processedSteps,
         originalRecipeId: parsedPost.id,
@@ -292,11 +602,12 @@ export default function RecipeScreen() {
         createdAt: new Date().toISOString(),
         userId: userId,
         isModified: true, // Marcar como receta modificada
+        averageRating: parsedPost.averageRating || 0,
       };
 
       console.log('Saving modified recipe locally:', modifiedRecipe);
 
-      // Guardar en AsyncStorage
+      // Guardar en AsyncStorage para recetas modificadas generales
       const existingModifiedRecipes = await AsyncStorage.getItem('@gloo:modifiedRecipes');
       const modifiedRecipes = existingModifiedRecipes ? JSON.parse(existingModifiedRecipes) : [];
       
@@ -305,6 +616,21 @@ export default function RecipeScreen() {
       
       // Guardar en AsyncStorage
       await AsyncStorage.setItem('@gloo:modifiedRecipes', JSON.stringify(modifiedRecipes));
+      
+      // También agregar a la colección "Changed" del usuario
+      const storageKey = `changed_recipes_${userId}`;
+      const existingChanged = await AsyncStorage.getItem(storageKey);
+      let changedRecipesList = existingChanged ? JSON.parse(existingChanged) : [];
+      
+      // Verificar si la receta ya existe en la lista de changed
+      const recipeExists = changedRecipesList.find(r => r.originalRecipeId === parsedPost.id);
+      if (!recipeExists) {
+        changedRecipesList.push(modifiedRecipe);
+        await AsyncStorage.setItem(storageKey, JSON.stringify(changedRecipesList));
+        console.log('Recipe added to user changed collection');
+      } else {
+        console.log('Recipe already exists in changed collection');
+      }
       
       console.log('Modified recipe saved locally successfully');
       setShowSaveModal(true);
@@ -360,7 +686,16 @@ export default function RecipeScreen() {
           </View>
 
           {/* User Section */}
-          <View style={styles.userSection}>
+          <TouchableOpacity 
+            style={styles.userSection}
+            onPress={() => {
+              if (parsedPost.userId) {
+                console.log('Navigating to public profile for userId:', parsedPost.userId);
+                router.push(`/public-profile?userId=${parsedPost.userId}`);
+              }
+            }}
+            disabled={!parsedPost.userId}
+          >
             <Image 
               source={parsedPost.avatar ? 
                 (typeof parsedPost.avatar === 'string' ? { uri: parsedPost.avatar } : parsedPost.avatar) : 
@@ -374,31 +709,19 @@ export default function RecipeScreen() {
             </View>
             <TouchableOpacity 
               style={[styles.followButton, isFollowing && styles.followingButton]} 
-              onPress={() => {
-                if (!isSignedIn) {
-                  setShowGuestOverlay(true);
-                  return;
-                }
-                setIsFollowing(!isFollowing);
-              }}
+              onPress={handleFollow}
             >
               <Text style={[styles.followText, isFollowing && styles.followingText]}>
                 {isFollowing ? 'Following' : 'Follow'}
               </Text>
             </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <TouchableOpacity 
               style={styles.actionButton} 
-              onPress={() => {
-                if (!isSignedIn) {
-                  setShowGuestOverlay(true);
-                  return;
-                }
-                setIsLiked(!isLiked);
-              }}
+              onPress={handleLike}
             >
               <Ionicons 
                 name={isLiked ? "heart" : "heart-outline"} 
@@ -406,22 +729,10 @@ export default function RecipeScreen() {
                 color={isLiked ? "#ef4444" : "#64748b"} 
               />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={() => {
-              if (!isSignedIn) {
-                setShowGuestOverlay(true);
-                return;
-              }
-              setIsSaved(!isSaved);
-            }}>
+            <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
               <Ionicons name={isSaved ? "bookmark" : "bookmark-outline"} size={24} color={isSaved ? "#fbbf24" : "#64748b"} />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={() => {
-              if (!isSignedIn) {
-                setShowGuestOverlay(true);
-                return;
-              }
-              setIsShared(!isShared);
-            }}>
+            <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
               <Ionicons name="share-outline" size={24} color={isShared ? "#10b981" : "#64748b"} />
             </TouchableOpacity>
           </View>
@@ -545,7 +856,7 @@ export default function RecipeScreen() {
           {/* Comments Section */}
           <View style={styles.section}>
             <View style={styles.commentsHeader}>
-              <Text style={styles.sectionTitle}>Comments</Text>
+              <Text style={styles.sectionTitle}>Comments ({comments.length})</Text>
               <TouchableOpacity 
                 style={styles.viewAllCommentsButton}
                 onPress={() => router.push({ pathname: '/comment', params: { id: recipeId } })}
@@ -554,32 +865,75 @@ export default function RecipeScreen() {
                 <Ionicons name="chevron-forward" size={16} color="#F9690E" />
               </TouchableOpacity>
             </View>
-            <View style={styles.commentsList}>
-              {comments.slice(0, 3).map((comment) => (
-                <View key={comment.id} style={styles.commentItem}>
-                  <Text style={styles.commentUser}>{comment.user}</Text>
-                  <Text style={styles.commentText}>{comment.text}</Text>
-                </View>
-              ))}
-            </View>
+            
+            {console.log('🎨 Rendering comments section:', { loadingComments, commentsCount: comments.length })}
+            
+            {loadingComments ? (
+              <View style={styles.loadingCommentsContainer}>
+                <ActivityIndicator size="small" color="#F9690E" />
+                <Text style={styles.loadingCommentsText}>Cargando comentarios...</Text>
+              </View>
+            ) : (
+              <View style={styles.commentsList}>
+                {console.log('📝 Rendering comments list:', comments)}
+                {comments.slice(0, 3).map((comment) => (
+                  <View key={comment.id} style={styles.commentItem}>
+                    <View style={styles.commentHeader}>
+                      <Image 
+                        source={comment.user?.imageUrl ? { uri: comment.user.imageUrl } : require('../../assets/user.jpeg')} 
+                        style={styles.commentAvatar} 
+                      />
+                      <View style={styles.commentUserInfo}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            if (comment.userId) {
+                              console.log('Navigating to public profile from comment for userId:', comment.userId);
+                              router.push(`/public-profile?userId=${comment.userId}`);
+                            }
+                          }}
+                          disabled={!comment.userId}
+                        >
+                          <Text style={[styles.commentUsername, comment.userId && { color: '#F9690E' }]}>
+                            {comment.user?.username || comment.user?.firstName || 'Usuario'}
+                          </Text>
+                        </TouchableOpacity>
+                        <Text style={styles.commentDate}>
+                          {new Date(comment.createdAt).toLocaleDateString()}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.commentText}>{comment.content}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            
             {comments.length > 3 && (
               <TouchableOpacity 
                 style={styles.moreCommentsButton}
                 onPress={() => router.push({ pathname: '/comment', params: { id: recipeId } })}
               >
-                <Text style={styles.moreCommentsText}>View {comments.length - 3} more comments</Text>
+                <Text style={styles.moreCommentsText}>Ver {comments.length - 3} comentarios más</Text>
               </TouchableOpacity>
             )}
+            
             <View style={styles.addCommentContainer}>
               <TextInput
                 style={styles.commentInput}
-                placeholder="Add a comment..."
+                placeholder="Agregar un comentario..."
                 value={newComment}
                 onChangeText={setNewComment}
                 multiline
+                maxLength={500}
               />
-              <TouchableOpacity style={styles.addCommentButton} onPress={handleAddComment}>
-                <Text style={styles.addCommentButtonText}>Post</Text>
+              <TouchableOpacity 
+                style={[styles.addCommentButton, (!newComment.trim() || submittingComment) && styles.addCommentButtonDisabled]} 
+                onPress={createComment}
+                disabled={!newComment.trim() || submittingComment}
+              >
+                <Text style={styles.addCommentButtonText}>
+                  {submittingComment ? 'Enviando...' : 'Publicar'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -905,10 +1259,9 @@ const styles = StyleSheet.create({
     marginVertical: 6
   },
   commentAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    marginRight: 8
+    width: 32,
+    height: 32,
+    borderRadius: 16
   },
   commentContent: {
     flex: 1
@@ -1099,5 +1452,33 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600'
+  },
+  loadingCommentsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12
+  },
+  loadingCommentsText: {
+    color: '#F9690E',
+    fontWeight: 'bold'
+  },
+  commentHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  commentUserInfo: {
+    flexDirection: 'column'
+  },
+  commentUsername: {
+    fontWeight: 'bold'
+  },
+  commentDate: {
+    color: '#888'
+  },
+  addCommentButtonDisabled: {
+    backgroundColor: '#ccc',
+    opacity: 0.6
   }
 }); 

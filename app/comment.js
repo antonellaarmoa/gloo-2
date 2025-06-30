@@ -16,8 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const COMMENTS_API_URL = 'https://gloo-api-production.up.railway.app/api/v1/comments';
+import { API_CONFIG, API_URLS } from '../config/api';
 
 export default function CommentsScreen() {
   const [comments, setComments] = useState([]);
@@ -38,30 +37,11 @@ export default function CommentsScreen() {
   console.log('Type of recipeId:', typeof recipeId);
   console.log('userId:', userId);
 
-  // Funciones para manejar comentarios locales
-  const saveCommentsLocally = async (comments) => {
-    try {
-      await AsyncStorage.setItem(`comments_${recipeId}`, JSON.stringify(comments));
-    } catch (error) {
-      console.log('Error saving comments locally:', error);
-    }
-  };
-
-  const loadCommentsLocally = async () => {
-    try {
-      const savedComments = await AsyncStorage.getItem(`comments_${recipeId}`);
-      return savedComments ? JSON.parse(savedComments) : [];
-    } catch (error) {
-      console.log('Error loading comments locally:', error);
-      return [];
-    }
-  };
-
   // Función para sincronizar comentarios con el backend
   const syncCommentsWithBackend = async () => {
     try {
       console.log('Attempting to sync comments with backend...');
-      const res = await fetch(`${COMMENTS_API_URL}/recipe/${recipeId}`, {
+      const res = await fetch(API_URLS.COMMENTS.BY_RECIPE(recipeId), {
         method: 'GET',
         headers: { 
           'Content-Type': 'application/json',
@@ -71,21 +51,13 @@ export default function CommentsScreen() {
 
       if (res.ok) {
         const data = await res.json();
-        let backendComments = [];
         
-        if (data && data.success && data.data) {
-          backendComments = Array.isArray(data.data) ? data.data : [];
-        } else if (Array.isArray(data)) {
-          backendComments = data;
-        }
-        
-        if (backendComments.length > 0) {
-          console.log('Backend comments found:', backendComments);
-          setComments(backendComments.reverse());
-          await saveCommentsLocally(backendComments.reverse());
-          Alert.alert('Sincronizado', 'Comentarios sincronizados con el servidor');
+        if (data && data.success && data.data && data.data.comments) {
+          console.log('Backend comments found:', data.data.comments);
+          setComments(data.data.comments);
+          Alert.alert('Sincronizado', 'Comentarios actualizados');
         } else {
-          Alert.alert('Sin cambios', 'No hay comentarios nuevos en el servidor');
+          Alert.alert('Sin cambios', 'No hay comentarios nuevos');
         }
       } else {
         throw new Error('Backend not available');
@@ -107,11 +79,9 @@ export default function CommentsScreen() {
     setLoading(true);
     console.log('Loading comments for recipe:', recipeId);
     
-    // Cargar comentarios del backend primero, luego locales como fallback
     const loadComments = async () => {
       try {
-        // Intentar cargar del backend
-        const response = await fetch(`${COMMENTS_API_URL}/recipe/${recipeId}`, {
+        const response = await fetch(API_URLS.COMMENTS.BY_RECIPE(recipeId), {
           method: 'GET',
           headers: { 
             'Content-Type': 'application/json',
@@ -121,76 +91,46 @@ export default function CommentsScreen() {
 
         if (response.ok) {
           const data = await response.json();
-          let backendComments = [];
           
-          if (data && data.success && data.data) {
-            backendComments = Array.isArray(data.data) ? data.data : [];
-          } else if (Array.isArray(data)) {
-            backendComments = data;
-          }
-          
-          if (backendComments.length > 0) {
-            console.log('Found backend comments:', backendComments);
-            setComments(backendComments.reverse());
-            await saveCommentsLocally(backendComments.reverse());
-          } else {
-            // Si no hay comentarios en el backend, cargar locales
-            const localComments = await loadCommentsLocally();
-            if (localComments.length > 0) {
-              console.log('Found local comments:', localComments);
-              setComments(localComments);
-            } else {
-              // Solo usar comentarios de ejemplo si no hay comentarios locales
-              console.log('No comments found, using fallback');
-              const fallbackComments = [
-                {
-                  id: 1,
-                  content: "¡Esta receta se ve deliciosa! Definitivamente la voy a probar.",
-                  createdAt: new Date().toISOString(),
-                  userId: "user_example",
-                  user: {
-                    id: "user_example",
-                    username: "ChefEjemplo",
-                    email: "chef@example.com",
-                    imageUrl: "https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9"
-                  }
-                },
-                {
-                  id: 2,
-                  content: "Los ingredientes se ven perfectos. ¿Alguien ya la probó?",
-                  createdAt: new Date(Date.now() - 3600000).toISOString(),
-                  userId: "user_example2",
-                  user: {
-                    id: "user_example2",
-                    username: "CocineroFeliz",
-                    email: "cocinero@example.com",
-                    imageUrl: "https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9"
-                  }
-                }
-              ];
-              setComments(fallbackComments);
+          if (data && data.success && data.data && data.data.comments) {
+            console.log('=== COMMENTS DATA FROM BACKEND ===');
+            console.log('Full response:', data);
+            console.log('Comments array:', data.data.comments);
+            
+            if (data.data.comments.length > 0) {
+              console.log('First comment full data:', data.data.comments[0]);
+              console.log('First comment user data:', data.data.comments[0]?.user);
+              console.log('First comment user fields:', {
+                username: data.data.comments[0]?.user?.username,
+                firstName: data.data.comments[0]?.user?.firstName,
+                email: data.data.comments[0]?.user?.email,
+                displayName: data.data.comments[0]?.user?.displayName,
+                name: data.data.comments[0]?.user?.name,
+                idSocialMedia: data.data.comments[0]?.user?.idSocialMedia,
+                id: data.data.comments[0]?.user?.id,
+                userId: data.data.comments[0]?.userId
+              });
+              
+              // Verificar si el backend está usando idSocialMedia en lugar del username real
+              if (data.data.comments[0]?.user?.idSocialMedia && !data.data.comments[0]?.user?.username) {
+                console.log('⚠️ PROBLEMA: Backend está usando idSocialMedia en lugar del username de Clerk');
+                console.log('idSocialMedia:', data.data.comments[0]?.user?.idSocialMedia);
+                console.log('userId (Clerk ID):', data.data.comments[0]?.userId);
+              }
             }
-          }
-        } else {
-          // Si el backend falla, cargar locales
-          const localComments = await loadCommentsLocally();
-          if (localComments.length > 0) {
-            console.log('Found local comments:', localComments);
-            setComments(localComments);
+            
+            setComments(data.data.comments);
           } else {
+            console.log('No comments found in backend');
             setComments([]);
           }
+        } else {
+          console.log('Backend error, status:', response.status);
+          setComments([]);
         }
       } catch (error) {
         console.log('Error loading comments:', error);
-        // Si hay error, cargar locales
-        const localComments = await loadCommentsLocally();
-        if (localComments.length > 0) {
-          console.log('Found local comments:', localComments);
-          setComments(localComments);
-        } else {
-          setComments([]);
-        }
+        setComments([]);
       } finally {
         setLoading(false);
       }
@@ -207,27 +147,12 @@ export default function CommentsScreen() {
     
     setSending(true);
     
-    // Crear el comentario localmente primero
-    const newCommentData = {
-      id: Date.now(),
-      content: newComment.trim(),
-      createdAt: new Date().toISOString(),
-      userId: userId,
-      recipeId: recipeId,
-      user: {
-        id: userId,
-        username: 'Tú',
-        email: '',
-        imageUrl: 'https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9'
-      }
-    };
-    
     try {
       console.log('Sending comment to backend...');
-      console.log('URL:', `${COMMENTS_API_URL}/${userId}`);
+      console.log('URL:', API_URLS.COMMENTS.CREATE(userId));
       console.log('Payload:', { recipeId: recipeId, content: newComment.trim() });
       
-      const res = await fetch(`${COMMENTS_API_URL}/${userId}`, {
+      const res = await fetch(API_URLS.COMMENTS.CREATE(userId), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -244,39 +169,40 @@ export default function CommentsScreen() {
       console.log('Response data:', data);
 
       if (res.ok && data.success) {
-        // Si el backend responde correctamente, usar los datos del backend
-        const backendCommentData = {
-          ...data.data,
-          id: data.data.id || Date.now(),
-          createdAt: data.data.createdAt || new Date().toISOString(),
-          user: data.data.user || newCommentData.user
+        // Función helper para obtener el nombre de usuario del nuevo comentario
+        const getUserDisplayName = (userData, userId) => {
+          if (!userData) return userId || 'Usuario';
+          
+          // Priorizar el username real de Clerk, NO usar idSocialMedia
+          return userData.username || 
+                 userData.firstName || 
+                 userData.email || 
+                 userData.displayName ||
+                 userData.name ||
+                 // Si no tenemos username, mostrar el userId (Clerk ID) en lugar de 'Usuario'
+                 userId ||
+                 'Usuario';
         };
-        
-        setComments(prev => [backendCommentData, ...prev]);
-        
-        // Guardar comentarios localmente para que persistan
-        const updatedComments = [backendCommentData, ...comments];
-        await saveCommentsLocally(updatedComments);
-        
+
+        // Asegurar que el nuevo comentario tenga el formato correcto
+        const newCommentWithUser = {
+          ...data.data,
+          user: {
+            ...data.data.user,
+            displayName: getUserDisplayName(data.data.user, data.data.userId)
+          }
+        };
+
+        // Agregar el nuevo comentario al inicio de la lista
+        setComments(prev => [newCommentWithUser, ...prev]);
         setNewComment('');
         Alert.alert('Éxito', 'Comentario agregado correctamente');
       } else {
-        // Si el backend falla, usar el comentario local
-        console.log('Backend failed, using local comment');
-        throw new Error('Backend failed');
+        Alert.alert('Error', data.error || 'No se pudo crear el comentario');
       }
     } catch (error) {
       console.log('Error sending comment:', error);
-      
-      // Usar comentario local cuando el backend falla
-      setComments(prev => [newCommentData, ...prev]);
-      
-      // Guardar comentarios localmente para que persistan
-      const updatedComments = [newCommentData, ...comments];
-      await saveCommentsLocally(updatedComments);
-      
-      setNewComment('');
-      Alert.alert('Comentario guardado', 'Comentario guardado localmente');
+      Alert.alert('Error', 'Error de conexión al crear el comentario');
     } finally {
       setSending(false);
     }
@@ -303,36 +229,75 @@ export default function CommentsScreen() {
     });
   };
 
-  const renderComment = ({ item }) => (
-    <View style={styles.commentContainer}>
-      <View style={styles.commentHeader}>
-        <Image 
-          source={{ uri: item.user?.imageUrl || 'https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9' }} 
-          style={styles.avatar}
-        />
-        <View style={styles.commentInfo}>
-          <Text style={styles.username}>
-            {item.user?.username || item.user?.firstName || item.user?.email || 'Usuario'}
-          </Text>
-          <Text style={styles.date}>{formatDate(item.createdAt)}</Text>
+  const renderComment = ({ item }) => {
+    // Función helper para obtener el nombre de usuario de diferentes formas
+    const getUserDisplayName = (userData, userId) => {
+      if (!userData) return userId || 'Usuario';
+      
+      // Priorizar el username real de Clerk, NO usar idSocialMedia
+      return userData.username || 
+             userData.firstName || 
+             userData.email || 
+             userData.displayName ||
+             userData.name ||
+             // Si no tenemos username, mostrar el userId (Clerk ID) en lugar de 'Usuario'
+             userId ||
+             'Usuario';
+    };
+
+    // Función helper para obtener la imagen del usuario
+    const getUserImage = (userData) => {
+      if (!userData) return 'https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9';
+      
+      return userData.imageUrl || 
+             userData.profileImage ||
+             userData.avatar ||
+             'https://img.clerk.com/eyJ0eXBlIjoicHJveHkiLCJzcmMiOiJodHRwczovL2ltYWdlcy5jbGVyay5kZXYvdXBsb2FkZWQvaW1nXzJ6QTNzeUU0cXZjQTdxTkRZNE56Nm5tb2hkaCJ9';
+    };
+
+    const displayName = getUserDisplayName(item.user, item.userId);
+    const userImage = getUserImage(item.user);
+
+    console.log('Rendering comment with user data:', {
+      commentId: item.id,
+      user: item.user,
+      displayName: displayName,
+      userImage: userImage,
+      userId: item.userId,
+      idSocialMedia: item.user?.idSocialMedia
+    });
+    
+    return (
+      <View style={styles.commentContainer}>
+        <View style={styles.commentHeader}>
+          <Image 
+            source={{ uri: userImage }} 
+            style={styles.avatar}
+          />
+          <View style={styles.commentInfo}>
+            <Text style={styles.username}>
+              {displayName}
+            </Text>
+            <Text style={styles.date}>{formatDate(item.createdAt)}</Text>
+          </View>
         </View>
+        <Text style={styles.commentText}>{item.content}</Text>
+        <TouchableOpacity 
+          style={styles.likeButton} 
+          onPress={() => toggleLike(item.id)}
+        >
+          <Ionicons 
+            name={item.liked ? 'heart' : 'heart-outline'} 
+            size={16} 
+            color={item.liked ? '#ff4757' : '#666'} 
+          />
+          <Text style={[styles.likeText, item.liked && styles.likedText]}>
+            {item.likes || 0}
+          </Text>
+        </TouchableOpacity>
       </View>
-      <Text style={styles.commentText}>{item.content}</Text>
-      <TouchableOpacity 
-        style={styles.likeButton} 
-        onPress={() => toggleLike(item.id)}
-      >
-        <Ionicons 
-          name={item.liked ? 'heart' : 'heart-outline'} 
-          size={16} 
-          color={item.liked ? '#ff4757' : '#666'} 
-        />
-        <Text style={[styles.likeText, item.liked && styles.likedText]}>
-          {item.likes || 0}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -349,14 +314,7 @@ export default function CommentsScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => {
-          if (router.canGoBack()) {
-            router.back();
-          } else {
-            // Si no hay pantalla anterior, ir a home
-            router.replace('/(tabs)/home');
-          }
-        }} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Comentarios</Text>

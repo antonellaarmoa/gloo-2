@@ -50,15 +50,9 @@ export default function NavBar({ state, descriptors, navigation }) {
       return;
     }
     
-    const event = navigation.emit({
-      type: 'tabPress',
-      target: tab.name,
-      canPreventDefault: true,
-    });
-    
     const isFocused = state.index === TABS.findIndex(t => t.name === tab.name);
-    if (!isFocused && !event.defaultPrevented) {
-      navigation.navigate(tab.name);
+    if (!isFocused) {
+      router.push(`/(tabs)/${tab.name}`);
     }
   };
 

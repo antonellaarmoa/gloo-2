@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eliminar Colecciones - Gloo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #E2773C;
+            text-align: center;
+        }
+        .input-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #E2773C;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover {
+            background-color: #d66a2f;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        .danger {
+            background-color: #dc3545;
+        }
+        .danger:hover {
+            background-color: #c82333;
+        }
+        .success {
+            background-color: #28a745;
+        }
+        .success:hover {
+            background-color: #218838;
+        }
+        .log {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗑️ Eliminar Colecciones - Gloo</h1>
+        
+        <div class="warning">
+            <strong>⚠️ ADVERTENCIA:</strong> Esta herramienta eliminará TODAS las colecciones del usuario especificado. Esta acción no se puede deshacer.
+        </div>
+
+        <div class="input-group">
+            <label for="userId">User ID:</label>
+            <input type="text" id="userId" placeholder="Ej: user_2z4Jc0ajOuIlLqZlvYQyJpbY5sx">
+        </div>
+
+        <div>
+            <button onclick="checkCollections()">🔍 Verificar Colecciones</button>
+            <button class="danger" onclick="deleteAllCollections()">🗑️ Eliminar TODAS las Colecciones</button>
+            <button class="success" onclick="clearLog()">🧹 Limpiar Log</button>
+        </div>
+
+        <div class="log" id="log">Esperando acción...</div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'https://gloo-api-production.up.railway.app/api/v1';
+        let logElement;
+
+        // Función para obtener todas las colecciones de un usuario
+        async function getUserCollections(userId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/collections/${userId}`);
+                const data = await response.json();
+                return data.data || [];
+            } catch (error) {
+                console.error('Error fetching collections:', error);
+                return [];
+            }
+        }
+
+        // Función para eliminar una colección
+        async function deleteCollection(userId, collectionId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/collections/${userId}/${collectionId}`, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                return response.ok;
+            } catch (error) {
+                console.error('Error deleting collection:', error);
+                return false;
+            }
+        }
+
+        // Función para verificar colecciones
+        async function checkCollections() {
+            const userId = document.getElementById('userId').value.trim();
+            if (!userId) {
+                log('❌ Por favor ingresa un User ID');
+                return;
+            }
+
+            log('🔍 Verificando colecciones para usuario:', userId);
+            
+            const collections = await getUserCollections(userId);
+            log(`📋 Encontradas ${collections.length} colecciones`);
+            
+            if (collections.length === 0) {
+                log('✅ Usuario no tiene colecciones');
+            } else {
+                log('📋 Colecciones:');
+                collections.forEach((collection, index) => {
+                    log(`${index + 1}. ID: ${collection.id}, Name: "${collection.name}", Display: "${collection.displayName}"`);
+                });
+            }
+        }
+
+        // Función para eliminar todas las colecciones
+        async function deleteAllCollections() {
+            const userId = document.getElementById('userId').value.trim();
+            if (!userId) {
+                log('❌ Por favor ingresa un User ID');
+                return;
+            }
+
+            if (!confirm('¿Estás seguro de que quieres eliminar TODAS las colecciones? Esta acción no se puede deshacer.')) {
+                log('❌ Operación cancelada por el usuario');
+                return;
+            }
+
+            log('🗑️ Eliminando TODAS las colecciones para usuario:', userId);
+            
+            const collections = await getUserCollections(userId);
+            log(`📋 Encontradas ${collections.length} colecciones para eliminar`);
+            
+            if (collections.length === 0) {
+                log('✅ No hay colecciones para eliminar');
+                return;
+            }
+            
+            // Mostrar todas las colecciones que se van a eliminar
+            log('📋 Colecciones que se eliminarán:');
+            collections.forEach((collection, index) => {
+                log(`${index + 1}. ID: ${collection.id}, Name: "${collection.name}", Display: "${collection.displayName}"`);
+            });
+            
+            // Eliminar todas las colecciones
+            let deletedCount = 0;
+            for (const collection of collections) {
+                log(`🗑️ Eliminando colección ID ${collection.id} (${collection.name})...`);
+                const success = await deleteCollection(userId, collection.id);
+                if (success) {
+                    log(`   ✅ Eliminada colección ID ${collection.id} (${collection.name})`);
+                    deletedCount++;
+                } else {
+                    log(`   ❌ Error al eliminar colección ID ${collection.id}`);
+                }
+            }
+            
+            // Verificar que se eliminaron todas
+            const remainingCollections = await getUserCollections(userId);
+            log(`📋 Colecciones restantes: ${remainingCollections.length}`);
+            
+            if (remainingCollections.length === 0) {
+                log('✅ ¡Todas las colecciones eliminadas exitosamente!');
+            } else {
+                log('⚠️ Algunas colecciones no se pudieron eliminar:', remainingCollections);
+            }
+        }
+
+        // Función para limpiar el log
+        function clearLog() {
+            logElement.textContent = 'Log limpiado...';
+        }
+
+        // Función para agregar texto al log
+        function log(...messages) {
+            if (!logElement) {
+                logElement = document.getElementById('log');
+            }
+            const timestamp = new Date().toLocaleTimeString();
+            const message = `[${timestamp}] ${messages.join(' ')}`;
+            logElement.textContent += '\n' + message;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        // Inicializar
+        document.addEventListener('DOMContentLoaded', function() {
+            logElement = document.getElementById('log');
+            log('🔧 Herramienta de eliminación de colecciones cargada');
+            log('📝 Ingresa un User ID y selecciona una acción');
+        });
+    </script>
+</body>
+</html> 

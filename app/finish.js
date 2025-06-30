@@ -3,8 +3,9 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, Modal } from 'r
 import ConfettiCannon from 'react-native-confetti-cannon';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { API_CONFIG, buildApiUrl } from '../config/api';
 
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
+const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
 export default function FinishScreen() {
   const { recipeId } = useLocalSearchParams();

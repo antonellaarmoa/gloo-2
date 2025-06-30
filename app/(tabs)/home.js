@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
-import { useRouter } from 'expo-router';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity, Modal, ActivityIndicator, Alert, Animated, Easing, TextInput, ScrollView } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection } from '../../utils/favoritesManager';
 
 const { height, width } = Dimensions.get('window');
 
@@ -131,7 +132,6 @@ const toggleSaveBackend = async (recipeId, userId, isSaved) => {
       },
       body: JSON.stringify({ recipeId }),
     });
-    
     return response.ok;
   } catch (error) {
     console.log('Error toggling save on backend:', error);
@@ -158,64 +158,17 @@ const loadFollowedUsersLocally = async () => {
   }
 };
 
-const toggleFollowBackend = async (targetUserId, currentUserId, isFollowing) => {
-  try {
-    const method = isFollowing ? 'DELETE' : 'POST';
-    const endpoint = isFollowing ? 'unfollow' : 'follow';
-    const response = await fetch(`https://gloo-api-production.up.railway.app/api/v1/users/${currentUserId}/${endpoint}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ targetUserId }),
-    });
-    
-    return response.ok;
-  } catch (error) {
-    console.log('Error toggling follow on backend:', error);
-    return false;
-  }
-};
-
-// Función para obtener recetas trending
-const fetchTrendingRecipes = async () => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/recipes/trending`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      return data.data || [];
-    } else {
-      // Si falla, usar recetas locales ordenadas por likes
-      const localRecipes = await AsyncStorage.getItem('@gloo:allRecipes');
-      if (localRecipes) {
-        const recipes = JSON.parse(localRecipes);
-        return recipes.sort((a, b) => (b.rates || 0) - (a.rates || 0)).slice(0, 10);
-      }
-      return [];
-    }
-  } catch (error) {
-    console.log('Error fetching trending recipes:', error);
-    // Si falla, usar recetas locales ordenadas por likes
-    const localRecipes = await AsyncStorage.getItem('@gloo:allRecipes');
-    if (localRecipes) {
-      const recipes = JSON.parse(localRecipes);
-      return recipes.sort((a, b) => (b.rates || 0) - (a.rates || 0)).slice(0, 10);
-    }
-    return [];
-  }
-};
-
 function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle, savedRecipes, onSaveToggle, followedUsers, onFollowToggle }) {
   const [likeCount, setLikeCount] = useState(Math.max(0, item.rates || 0));
   const [isShared, setIsShared] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [userCollections, setUserCollections] = useState([]);
+  const [loadingCollections, setLoadingCollections] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  const [selectedCollection, setSelectedCollection] = useState(null);
+  const [savingRecipe, setSavingRecipe] = useState(false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
@@ -230,7 +183,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   const isSaved = savedRecipes[item.id] || false;
   
   // Verificar si sigue al usuario
-  const isFollowing = followedUsers[item.user?.id] || false;
+  const isFollowing = followedUsers[item.userId] || followedUsers[item.user?.id] || false;
 
   // Obtener información del usuario con fallbacks
   const userInfo = {
@@ -255,34 +208,25 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
 
   // Función para obtener imagen de receta con fallback
   const getRecipeImageSource = () => {
-    const title = item.title?.toLowerCase() || '';
-    console.log('Recipe title for image detection:', title);
-    
-    // Forzar fallback para tacos de carnitas mexicanos
-    if (title.includes('carnitas') || title.includes('tacos de carnitas')) {
-      console.log('Using carnitas specific image for:', title);
-      return require('../../assets/french-toast.jpg'); // Imagen específica para carnitas
-    }
-    
-    // Verificar si tiene imagen en el backend
+    // Usar la imagen real de la receta si existe
     if (item.image && item.image !== 'null' && item.image !== '') {
-      console.log('Using backend image for:', item.title, item.image);
       return { uri: item.image };
     }
-    
-    // Fallback basado en el título de la receta
-    if (title.includes('teriyaki') || title.includes('chicken bowl')) {
+    // Fallbacks
+    const title = item.title?.toLowerCase() || '';
+    if (title.includes('tacos de pollo tikka') || title.includes('pollo tikka')) {
+      return require('../../assets/teriyaki.jpg');
+    } else if (title.includes('souffle') || title.includes('soufflé') || title.includes('queso')) {
+      return require('../../assets/hamburguesa.png');
+    } else if (title.includes('teriyaki') || title.includes('chicken bowl')) {
       return require('../../assets/teriyaki.jpg');
     } else if (title.includes('avocado') || title.includes('toast')) {
       return require('../../assets/avocado-toast.jpg');
     } else if (title.includes('french') || title.includes('toast')) {
       return require('../../assets/french-toast.jpg');
-    } else if (title.includes('tacos') || title.includes('mexican') || title.includes('taco') || title.includes('pork')) {
-      console.log('Using taco fallback image for:', title);
-      return require('../../assets/teriyaki.jpg'); // Usar teriyaki como fallback para otros tacos
+    } else if (title.includes('tacos') || title.includes('mexican') || title.includes('taco') || title.includes('pork') || title.includes('carnitas')) {
+      return require('../../assets/teriyaki.jpg');
     } else {
-      console.log('Using default image for:', title);
-      // Imagen por defecto
       return require('../../assets/avocado-toast.jpg');
     }
   };
@@ -314,20 +258,20 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   };
 
   const toggleSaved = async () => {
-    if (isGuest) {
-      onGuestLimit();
-      return;
-    }
-    
-    // Actualizar UI inmediatamente
-    onSaveToggle(item.id, !isSaved);
-
-    // Intentar sincronizar con backend
-    if (userId) {
-      const success = await toggleSaveBackend(item.id, userId, isSaved);
-      if (!success) {
-        console.log('Backend sync failed, keeping local state');
+    if (!userId) return;
+    if (isSaved) {
+      // Quitar de favoritos en backend
+      const ok = await toggleSaveBackend(item.id, userId, true);
+      if (ok) {
+        await removeFromFavorites(userId, item.id);
+        onSaveToggle(item.id, false);
+        refreshProfileFavorites();
+        setTimeout(() => refreshProfileFavorites(), 500);
       }
+    } else {
+      // Si no está guardada, abrir modal para elegir favoritos o colección
+      await fetchUserCollections();
+      setShowSaveModal(true);
     }
   };
 
@@ -351,19 +295,159 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   };
 
   const handleUserPress = async () => {
+    console.log('🔍 handleUserPress called');
+    console.log('📊 item data:', {
+      id: item.id,
+      title: item.title,
+      user: item.user,
+      userId: item.userId
+    });
+    
     if (isGuest) {
       onGuestLimit();
       return;
     }
     
-    // Toggle follow
-    onFollowToggle(item.user?.id, !isFollowing);
+    // Intentar diferentes campos para el ID del usuario
+    const userId = item.user?.id || item.userId || item.user?.userId;
+    console.log('👤 User ID found:', userId);
     
-    // Intentar sincronizar con backend
-    if (userId && item.user?.id) {
-      const success = await toggleFollowBackend(item.user.id, userId, isFollowing);
-      if (!success) {
-        console.log('Backend sync failed, keeping local state');
+    if (userId) {
+      console.log('🚀 Navigating to public profile with userId:', userId);
+      router.push({
+        pathname: '/public-profile',
+        params: { userId: userId.toString() }
+      });
+    } else {
+      console.log('❌ No user ID found, cannot navigate to profile');
+      // Fallback: mostrar alerta o navegar a una pantalla de error
+      Alert.alert('Error', 'No se pudo cargar el perfil del usuario');
+    }
+  };
+
+  // Sobrescribir fetchUserCollections para usar solo frontend para colecciones personalizadas
+  const fetchUserCollections = async () => {
+    setLoadingCollections(true);
+    try {
+      let collections = await getCustomCollections(userId);
+      // Filtrar colecciones no válidas para el modal:
+      collections = collections.filter(
+        c => !['Favoritos', 'jsjsjs', 'Salty', 'Dulce'].includes(c.name) &&
+             !['Favoritos', 'jsjsjs', 'Salty', 'Dulce'].includes(c.displayName)
+      );
+      setUserCollections(collections);
+    } catch (error) {
+      console.error('Error fetching collections:', error);
+      setUserCollections([]);
+    } finally {
+      setLoadingCollections(false);
+    }
+  };
+
+  // Guardar receta en una colección personalizada (solo frontend)
+  const saveRecipeToCollection = async (collectionId = null, collectionName = null) => {
+    if (!userId) return;
+    setSavingRecipe(true);
+    try {
+      if (collectionId && collectionId !== 'all') {
+        // Guardar en colección personalizada (solo frontend)
+        const ok = await addRecipeToCustomCollection(userId, collectionId, item);
+        if (ok) {
+          onSaveToggle(item.id, true);
+          setShowSaveModal(false);
+          setSelectedCollection(null);
+          setNewCollectionName('');
+          refreshProfileFavorites();
+          setTimeout(() => refreshProfileFavorites(), 500);
+          Alert.alert('¡Éxito!', 'Receta guardada en la colección');
+        } else {
+          Alert.alert('Error', 'No se pudo guardar la receta (puede que ya esté en la colección)');
+        }
+      } else if (collectionName) {
+        // Crear nueva colección personalizada y guardar receta
+        const newCol = await createCustomCollection(userId, collectionName.toLowerCase().replace(/\s+/g, '-'), collectionName);
+        if (newCol) {
+          await addRecipeToCustomCollection(userId, newCol.id, item);
+          fetchUserCollections();
+          onSaveToggle(item.id, true);
+          setShowSaveModal(false);
+          setSelectedCollection(null);
+          setNewCollectionName('');
+          refreshProfileFavorites();
+          setTimeout(() => refreshProfileFavorites(), 500);
+          Alert.alert('¡Éxito!', 'Colección creada y receta guardada');
+        } else {
+          Alert.alert('Error', 'No se pudo crear la colección (puede que ya exista)');
+        }
+      } else {
+        // Guardar en favoritos (backend)
+        const endpoint = `${API_BASE_URL}/collections/${userId}/default/recipes`;
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ recipeId: item.id })
+        });
+        if (res.ok) {
+          onSaveToggle(item.id, true);
+          setShowSaveModal(false);
+          setSelectedCollection(null);
+          setNewCollectionName('');
+          try { await addToFavorites(userId, item); } catch (localError) { console.log('Error saving to local favorites:', localError); }
+          refreshProfileFavorites();
+          setTimeout(() => refreshProfileFavorites(), 500);
+          Alert.alert('¡Éxito!', 'Receta guardada en favoritos');
+        } else {
+          const errorData = await res.text();
+          let errorMessage = 'Error al guardar la receta';
+          try { const errorJson = JSON.parse(errorData); errorMessage = errorJson.error || errorJson.message || errorMessage; } catch (e) { errorMessage = errorData || errorMessage; }
+          throw new Error(errorMessage);
+        }
+      }
+    } catch (error) {
+      console.error('Error saving recipe:', error);
+      Alert.alert('Error', `No se pudo guardar la receta: ${error.message}`);
+    } finally {
+      setSavingRecipe(false);
+    }
+  };
+
+  // Función para manejar follow/unfollow
+  const toggleFollow = async () => {
+    if (isGuest) {
+      onGuestLimit();
+      return;
+    }
+    
+    const targetUserId = item.userId || item.user?.id;
+    if (!targetUserId) return;
+    
+    console.log('Toggle follow:', { targetUserId, currentUserId: userId, isFollowing });
+    
+    // Actualizar estado local inmediatamente
+    onFollowToggle(targetUserId, !isFollowing);
+    
+    // Intentar sincronizar con backend (sin revertir si falla)
+    if (userId) {
+      try {
+        const method = isFollowing ? 'DELETE' : 'POST';
+        const endpoint = isFollowing ? 'unfollow' : 'follow';
+        const response = await fetch(`${API_BASE_URL}/follows/${userId}/${endpoint}`, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ followingId: targetUserId }),
+        });
+        
+        console.log('Follow response status:', response.status);
+        
+        if (!response.ok) {
+          console.log('Backend sync failed, but keeping local state for better UX');
+          // No revertir el estado - mantener la experiencia del usuario
+        }
+      } catch (error) {
+        console.error('Error toggling follow:', error);
+        // No revertir el estado - mantener la experiencia del usuario
       }
     }
   };
@@ -400,6 +484,20 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
               </Text>
             </View>
           </TouchableOpacity>
+          
+          {/* Botón de seguir arriba del View recipe */}
+          {!isGuest && (
+            <TouchableOpacity 
+              style={[styles.followButton, isFollowing && styles.followingButton]} 
+              onPress={toggleFollow}
+            >
+              <Text style={[styles.followText, isFollowing && styles.followingText]}>
+                {isFollowing ? 'Siguiendo' : 'Seguir'}
+              </Text>
+            </TouchableOpacity>
+          )}
+          
+          {/* Botón View recipe */}
           <TouchableOpacity
             style={styles.viewRecipeButton}
             onPress={handleViewRecipe}
@@ -407,7 +505,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
             <Text style={styles.viewRecipeText}>View recipe</Text>
           </TouchableOpacity>
           <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.description}>{item.description}</Text>
+          <Text style={styles.description}>{item.description || 'Sin descripción'}</Text>
           <View style={styles.metaContainer}>
             <View style={styles.metaItem}>
               <Ionicons name="time-outline" size={18} color="white" />
@@ -425,6 +523,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionIcon} onPress={isGuest ? onGuestLimit : () => router.push({ pathname: '/comment', params: { id: item.id } })}>
               <Ionicons name="chatbubble-ellipses" size={30} color="white" />
+              <Text style={styles.actionText}>{item.comments || 0}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionIcon} onPress={toggleSaved}>
               <Ionicons name="bookmark" size={30} color={isSaved ? '#fbbf24' : 'white'} />
@@ -435,39 +534,323 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
           </View>
         </View>
       </View>
+      
+      {/* Modal para guardar en colección */}
+      <Modal
+        visible={showSaveModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowSaveModal(false)}
+      >
+        <View style={styles.saveModalOverlay}>
+          <View style={styles.saveModalContent}>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Header */}
+              <View style={styles.saveModalHeader}>
+                <Text style={styles.saveModalTitle}>Guardar receta</Text>
+                <TouchableOpacity 
+                  onPress={() => setShowSaveModal(false)}
+                  style={styles.saveModalCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#666" />
+                </TouchableOpacity>
+              </View>
+              
+              {/* Recipe info */}
+              <View style={styles.saveModalRecipeInfo}>
+                <Image 
+                  source={getRecipeImageSource()} 
+                  style={styles.saveModalRecipeImage}
+                />
+                <View style={styles.saveModalRecipeText}>
+                  <Text style={styles.saveModalRecipeTitle}>{item.title}</Text>
+                  <Text style={styles.saveModalRecipeDescription}>
+                    {item.description || 'Sin descripción'}
+                  </Text>
+                </View>
+              </View>
+              
+              {/* Collections list */}
+              <View style={styles.saveModalCollections}>
+                <Text style={styles.saveModalSectionTitle}>Guardar en:</Text>
+                
+                {/* Option: All publications (favorites) */}
+                <TouchableOpacity 
+                  style={[
+                    styles.saveModalCollectionItem,
+                    selectedCollection === 'all' && styles.saveModalCollectionItemSelected
+                  ]}
+                  onPress={() => setSelectedCollection('all')}
+                >
+                  <View style={styles.saveModalCollectionIcon}>
+                    <Ionicons name="heart" size={20} color="#f97316" />
+                  </View>
+                  <View style={styles.saveModalCollectionInfo}>
+                    <Text style={styles.saveModalCollectionName}>Todas las publicaciones</Text>
+                    <Text style={styles.saveModalCollectionDescription}>Guardar en favoritos</Text>
+                  </View>
+                  {selectedCollection === 'all' && (
+                    <Ionicons name="checkmark-circle" size={24} color="#f97316" />
+                  )}
+                </TouchableOpacity>
+                
+                {/* Existing collections (only if user has them) */}
+                {loadingCollections ? (
+                  <View style={styles.saveModalLoading}>
+                    <ActivityIndicator size="small" color="#f97316" />
+                    <Text style={styles.saveModalLoadingText}>Cargando colecciones...</Text>
+                  </View>
+                ) : userCollections.length > 0 ? (
+                  userCollections.map((collection) => (
+                    <TouchableOpacity 
+                      key={collection.id}
+                      style={[
+                        styles.saveModalCollectionItem,
+                        selectedCollection === collection.id && styles.saveModalCollectionItemSelected
+                      ]}
+                      onPress={() => setSelectedCollection(collection.id)}
+                    >
+                      <View style={styles.saveModalCollectionIcon}>
+                        <Ionicons name="folder" size={20} color="#10b981" />
+                      </View>
+                      <View style={styles.saveModalCollectionInfo}>
+                        <Text style={styles.saveModalCollectionName}>
+                          {collection.displayName || collection.name}
+                        </Text>
+                        <Text style={styles.saveModalCollectionDescription}>
+                          {collection.recipeCount || 0} recetas
+                        </Text>
+                      </View>
+                      {selectedCollection === collection.id && (
+                        <Ionicons name="checkmark-circle" size={24} color="#f97316" />
+                      )}
+                    </TouchableOpacity>
+                  ))
+                ) : null}
+                
+                {/* Option: Create new collection */}
+                <TouchableOpacity 
+                  style={[
+                    styles.saveModalCollectionItem,
+                    selectedCollection === 'new' && styles.saveModalCollectionItemSelected
+                  ]}
+                  onPress={() => setSelectedCollection('new')}
+                >
+                  <View style={styles.saveModalCollectionIcon}>
+                    <Ionicons name="add-circle" size={20} color="#3b82f6" />
+                  </View>
+                  <View style={styles.saveModalCollectionInfo}>
+                    <Text style={styles.saveModalCollectionName}>Crear nueva colección</Text>
+                    <Text style={styles.saveModalCollectionDescription}>Organizar tus recetas</Text>
+                  </View>
+                  {selectedCollection === 'new' && (
+                    <Ionicons name="checkmark-circle" size={24} color="#f97316" />
+                  )}
+                </TouchableOpacity>
+              </View>
+              
+              {/* New collection input */}
+              {selectedCollection === 'new' && (
+                <View style={styles.saveModalNewCollection}>
+                  <Text style={styles.saveModalSectionTitle}>Nombre de la colección:</Text>
+                  <TextInput
+                    style={styles.saveModalInput}
+                    placeholder="Ej: Postres favoritos"
+                    value={newCollectionName}
+                    onChangeText={setNewCollectionName}
+                    maxLength={50}
+                  />
+                </View>
+              )}
+            </ScrollView>
+            
+            {/* Save button - fuera del ScrollView */}
+            <TouchableOpacity 
+              style={[
+                styles.saveModalButton,
+                (!selectedCollection || (selectedCollection === 'new' && !newCollectionName.trim()) || savingRecipe) && 
+                styles.saveModalButtonDisabled
+              ]}
+              onPress={() => {
+                if (selectedCollection === 'all') {
+                  saveRecipeToCollection();
+                } else if (selectedCollection === 'new') {
+                  if (newCollectionName.trim()) {
+                    saveRecipeToCollection(null, newCollectionName.trim());
+                  }
+                } else if (selectedCollection) {
+                  saveRecipeToCollection(selectedCollection);
+                }
+              }}
+              disabled={!selectedCollection || (selectedCollection === 'new' && !newCollectionName.trim()) || savingRecipe}
+            >
+              {savingRecipe ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.saveModalButtonText}>Guardar</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </ImageBackground>
   );
 }
 
 export default function HomeScreen() {
-  const [activeTab, setActiveTab] = useState('For You');
+  const router = useRouter();
   const { isSignedIn, userId } = useAuth();
-  const [showGuestModal, setShowGuestModal] = useState(false);
+  const [activeTab, setActiveTab] = useState('For You');
   const [userLikes, setUserLikes] = useState({});
   const [savedRecipes, setSavedRecipes] = useState({});
   const [followedUsers, setFollowedUsers] = useState({});
+  const [showGuestModal, setShowGuestModal] = useState(false);
   const [trendingRecipes, setTrendingRecipes] = useState([]);
+  
+  // Animation refs for loading dots
+  const dot1Anim = useRef(new Animated.Value(0)).current;
+  const dot2Anim = useRef(new Animated.Value(0)).current;
+  const dot3Anim = useRef(new Animated.Value(0)).current;
+  const shimmerAnim = useRef(new Animated.Value(0)).current;
+
+  // Loading dots animation
+  useEffect(() => {
+    const animateDots = () => {
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(dot1Anim, {
+            toValue: 1,
+            duration: 600,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot2Anim, {
+            toValue: 1,
+            duration: 600,
+            delay: 200,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot3Anim, {
+            toValue: 1,
+            duration: 600,
+            delay: 400,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(dot1Anim, {
+            toValue: 0,
+            duration: 600,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot2Anim, {
+            toValue: 0,
+            duration: 600,
+            delay: 200,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dot3Anim, {
+            toValue: 0,
+            duration: 600,
+            delay: 400,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start(() => animateDots());
+    };
+
+    // Shimmer animation
+    const animateShimmer = () => {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(shimmerAnim, {
+            toValue: 1,
+            duration: 1500,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+          Animated.timing(shimmerAnim, {
+            toValue: 0,
+            duration: 1500,
+            easing: Easing.ease,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    };
+
+    animateDots();
+    animateShimmer();
+  }, [dot1Anim, dot2Anim, dot3Anim, shimmerAnim]);
+
+  // Cargar datos al montar el componente
+  useEffect(() => {
+    if (isSignedIn && userId) {
+      loadLikesLocally().then(likes => setUserLikes(likes));
+      loadSavedRecipesLocally().then(saved => {
+        setSavedRecipes(saved);
+        
+        // Sincronizar con favoritos locales
+        const syncWithFavorites = async () => {
+          try {
+            const combinedSaved = await syncFavoritesWithSavedState(userId, saved);
+            setSavedRecipes(combinedSaved);
+          } catch (error) {
+            console.log('Error syncing with favorites:', error);
+          }
+        };
+        
+        syncWithFavorites();
+      });
+      loadFollowedUsersLocally().then(followed => setFollowedUsers(followed));
+    }
+  }, [isSignedIn, userId]);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['recipes'],
     queryFn: fetchRecipes,
   });
+  
   const isGuest = !isSignedIn;
-  const router = useRouter();
 
-  // Cargar datos al montar el componente
-  React.useEffect(() => {
-    if (isSignedIn) {
-      Promise.all([
-        loadLikesLocally(),
-        loadSavedRecipesLocally(),
-        loadFollowedUsersLocally()
-      ]).then(([likes, saved, followed]) => {
-        setUserLikes(likes);
-        setSavedRecipes(saved);
-        setFollowedUsers(followed);
+  // Función para obtener recetas trending
+  const fetchTrendingRecipes = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/recipes/trending`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.data || [];
+      } else {
+        // Si falla, usar recetas locales ordenadas por likes
+        const localRecipes = await AsyncStorage.getItem('@gloo:allRecipes');
+        if (localRecipes) {
+          const recipes = JSON.parse(localRecipes);
+          return recipes.sort((a, b) => (b.rates || 0) - (a.rates || 0)).slice(0, 10);
+        }
+        return [];
+      }
+    } catch (error) {
+      console.log('Error fetching trending recipes:', error);
+      // Si falla, usar recetas locales ordenadas por likes
+      const localRecipes = await AsyncStorage.getItem('@gloo:allRecipes');
+      if (localRecipes) {
+        const recipes = JSON.parse(localRecipes);
+        return recipes.sort((a, b) => (b.rates || 0) - (a.rates || 0)).slice(0, 10);
+      }
+      return [];
     }
-  }, [isSignedIn]);
+  };
 
   // Cargar recetas trending cuando se cambia a tab Following
   React.useEffect(() => {
@@ -490,14 +873,58 @@ export default function HomeScreen() {
     const newSaved = { ...savedRecipes, [recipeId]: isSaved };
     setSavedRecipes(newSaved);
     await saveSavedRecipesLocally(newSaved);
+    
+    // Sincronizar con favoritos locales
+    if (userId) {
+      try {
+        if (isSaved) {
+          // Agregar a favoritos si no existe
+          const recipe = data?.find(r => r.id === recipeId);
+          if (recipe) {
+            await addToFavorites(userId, recipe);
+          }
+        } else {
+          // Remover de favoritos
+          await removeFromFavorites(userId, recipeId);
+        }
+        
+        // Refrescar favoritos en el perfil
+        refreshProfileFavorites();
+      } catch (error) {
+        console.log('Error syncing with local favorites:', error);
+      }
+    }
   };
 
-  // Función para manejar cambios de seguir
-  const handleFollowToggle = async (userId, isFollowing) => {
-    const newFollowed = { ...followedUsers, [userId]: isFollowing };
-    setFollowedUsers(newFollowed);
-    await saveFollowedUsersLocally(newFollowed);
+  // Sincronizar seguidos con backend
+  const syncFollowedUsersWithBackend = async () => {
+    if (!userId) return;
+    try {
+      const res = await fetch(`https://gloo-api-production.up.railway.app/api/v1/follows/${userId}/following`);
+      if (res.ok) {
+        const data = await res.json();
+        const followingArr = Array.isArray(data.data?.following) ? data.data.following : [];
+        const newFollowed = {};
+        followingArr.forEach(u => {
+          if (u.followingId) newFollowed[u.followingId] = true;
+        });
+        setFollowedUsers(newFollowed);
+        await saveFollowedUsersLocally(newFollowed);
+      }
+    } catch (e) {
+      // Si falla, no sobreescribir el estado local
+    }
   };
+
+  useEffect(() => {
+    syncFollowedUsersWithBackend();
+  }, [userId]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      syncFollowedUsersWithBackend();
+    }, [userId])
+  );
 
   // Determinar qué datos mostrar según el tab activo
   let visibleData = data;
@@ -529,16 +956,159 @@ export default function HomeScreen() {
 
   if (isLoading) {
     return (
-      <View style={styles.container}>
-        <Text style={{ color: 'white', textAlign: 'center', marginTop: 40 }}>Loading recipes...</Text>
+      <View style={styles.loadingContainer}>
+        {/* Background gradient */}
+        <View style={styles.loadingBackground} />
+        
+        {/* Logo and loading animation */}
+        <View style={styles.loadingContent}>
+          <Image 
+            source={require('../../assets/gloo.png')} 
+            style={styles.loadingLogo}
+            resizeMode="contain"
+          />
+          
+          {/* Animated dots */}
+          <View style={styles.loadingDots}>
+            <Animated.View 
+              style={[
+                styles.dot, 
+                styles.dot1, 
+                {
+                  opacity: dot1Anim,
+                  transform: [{
+                    scale: dot1Anim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.5, 1.2],
+                    }),
+                  }],
+                }
+              ]} 
+            />
+            <Animated.View 
+              style={[
+                styles.dot, 
+                styles.dot2, 
+                {
+                  opacity: dot2Anim,
+                  transform: [{
+                    scale: dot2Anim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.5, 1.2],
+                    }),
+                  }],
+                }
+              ]} 
+            />
+            <Animated.View 
+              style={[
+                styles.dot, 
+                styles.dot3, 
+                {
+                  opacity: dot3Anim,
+                  transform: [{
+                    scale: dot3Anim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.5, 1.2],
+                    }),
+                  }],
+                }
+              ]} 
+            />
+          </View>
+          
+          <Text style={styles.loadingTitle}>Cargando recetas deliciosas</Text>
+          <Text style={styles.loadingSubtitle}>Preparando tu experiencia culinaria...</Text>
+          
+          {/* Recipe cards skeleton */}
+          <View style={styles.skeletonContainer}>
+            {[1, 2, 3].map((index) => (
+              <View key={index} style={styles.skeletonCard}>
+                <Animated.View 
+                  style={[
+                    styles.skeletonImage,
+                    {
+                      opacity: shimmerAnim.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.3, 0.7],
+                      }),
+                    }
+                  ]} 
+                />
+                <View style={styles.skeletonContent}>
+                  <Animated.View 
+                    style={[
+                      styles.skeletonTitle,
+                      {
+                        opacity: shimmerAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.3, 0.7],
+                        }),
+                      }
+                    ]} 
+                  />
+                  <View style={styles.skeletonUser}>
+                    <Animated.View 
+                      style={[
+                        styles.skeletonAvatar,
+                        {
+                          opacity: shimmerAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.3, 0.7],
+                          }),
+                        }
+                      ]} 
+                    />
+                    <Animated.View 
+                      style={[
+                        styles.skeletonUsername,
+                        {
+                          opacity: shimmerAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [0.3, 0.7],
+                          }),
+                        }
+                      ]} 
+                    />
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
       </View>
     );
   }
 
   if (error) {
     return (
-      <View style={styles.container}>
-        <Text style={{ color: 'red', textAlign: 'center', marginTop: 40 }}>Error loading recipes</Text>
+      <View style={styles.errorContainer}>
+        <View style={styles.errorBackground} />
+        
+        <View style={styles.errorContent}>
+          <Image 
+            source={require('../../assets/glooenojado.png')} 
+            style={styles.errorImage}
+            resizeMode="contain"
+          />
+          
+          <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
+          <Text style={styles.errorSubtitle}>No pudimos cargar las recetas</Text>
+          <Text style={styles.errorMessage}>
+            {error.message || 'Verifica tu conexión a internet e intenta de nuevo'}
+          </Text>
+          
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => {
+              // Refetch data
+              window.location.reload();
+            }}
+          >
+            <Ionicons name="refresh" size={20} color="#fff" />
+            <Text style={styles.retryButtonText}>Intentar de nuevo</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -568,7 +1138,7 @@ export default function HomeScreen() {
             savedRecipes={savedRecipes}
             onSaveToggle={handleSaveToggle}
             followedUsers={followedUsers}
-            onFollowToggle={handleFollowToggle}
+            onFollowToggle={setFollowedUsers}
           />
         )}
         pagingEnabled
@@ -791,5 +1361,342 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  loadingBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+  },
+  loadingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingLogo: {
+    width: 120,
+    height: 120,
+    marginBottom: 30,
+    opacity: 0.9,
+  },
+  loadingDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 30,
+    gap: 8,
+  },
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginHorizontal: 4,
+  },
+  dot1: {
+    backgroundColor: '#f97316',
+  },
+  dot2: {
+    backgroundColor: '#fbbf24',
+  },
+  dot3: {
+    backgroundColor: '#10b981',
+  },
+  loadingTitle: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 12,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
+  },
+  loadingSubtitle: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 40,
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+  skeletonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    marginTop: 30,
+    gap: 15,
+  },
+  skeletonCard: {
+    width: '30%',
+    height: 180,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 15,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  skeletonImage: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 10,
+    margin: 8,
+  },
+  skeletonContent: {
+    padding: 12,
+  },
+  skeletonTitle: {
+    height: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginBottom: 8,
+    borderRadius: 4,
+  },
+  skeletonUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  skeletonAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginRight: 8,
+  },
+  skeletonUsername: {
+    height: 12,
+    width: 60,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 4,
+  },
+  errorContainer: {
+    flex: 1,
+    backgroundColor: 'black',
+  },
+  errorBackground: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+  },
+  errorContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorImage: {
+    width: 200,
+    height: 200,
+    marginBottom: 20,
+  },
+  errorTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  errorSubtitle: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  errorMessage: {
+    color: '#fff',
+    fontSize: 14,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#f97316',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  saveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  saveModalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    width: '100%',
+    maxHeight: '90%',
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  saveModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    paddingBottom: 15,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  saveModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1e293b',
+  },
+  saveModalCloseButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f1f5f9',
+  },
+  saveModalRecipeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+    padding: 16,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+  },
+  saveModalRecipeImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    marginRight: 12,
+  },
+  saveModalRecipeText: {
+    flex: 1,
+  },
+  saveModalRecipeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 4,
+  },
+  saveModalRecipeDescription: {
+    fontSize: 14,
+    color: '#64748b',
+    lineHeight: 18,
+  },
+  saveModalCollections: {
+    marginBottom: 24,
+  },
+  saveModalSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 12,
+  },
+  saveModalCollectionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+  },
+  saveModalCollectionItemSelected: {
+    borderColor: '#f97316',
+    backgroundColor: '#fff7ed',
+  },
+  saveModalCollectionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#f1f5f9',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  saveModalCollectionInfo: {
+    flex: 1,
+  },
+  saveModalCollectionName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1e293b',
+    marginBottom: 2,
+  },
+  saveModalCollectionDescription: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  saveModalLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  saveModalLoadingText: {
+    fontSize: 14,
+    color: '#64748b',
+    marginLeft: 8,
+  },
+  saveModalNewCollection: {
+    marginBottom: 24,
+  },
+  saveModalInput: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 15,
+    backgroundColor: '#ffffff',
+  },
+  saveModalButton: {
+    backgroundColor: '#f97316',
+    padding: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#f97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  saveModalButtonDisabled: {
+    backgroundColor: '#cbd5e1',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  saveModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  followButton: {
+    backgroundColor: '#1e40af',
+    paddingVertical: 6,
+    paddingHorizontal: 18,
+    borderRadius: 15,
+    height: 32,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  followingButton: {
+    backgroundColor: '#1e3a8a',
+  },
+  followText: {
+    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 12,
+  },
+  followingText: {
+    fontWeight: 'bold',
+    color: '#fff',
+    fontSize: 12,
   },
 });

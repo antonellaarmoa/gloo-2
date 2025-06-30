@@ -43,7 +43,7 @@ export const apiRequest = async (url, options = {}) => {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
     },
-    signal: AbortSignal.timeout(API_CONFIG.TIMEOUT),
+    // signal: AbortSignal.timeout(API_CONFIG.TIMEOUT), // QUITADO para compatibilidad RN
   };
 
   try {
@@ -119,5 +119,7 @@ export const API_URLS = {
     // Colección por defecto (Favoritos)
     ADD_TO_FAVORITES: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/default/recipes`),
     REMOVE_FROM_FAVORITES: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/default/recipes`),
+    // Crear colecciones por defecto
+    CREATE_DEFAULT: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/default`),
   },
 }; 

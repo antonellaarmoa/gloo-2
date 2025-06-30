@@ -11,10 +11,11 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
+import { API_CONFIG, buildApiUrl } from '../config/api';
 
 const { width } = Dimensions.get('window');
 
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
+const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
 function fetchRecipes() {
   console.log('Fetching all recipes from:', API_URL);
@@ -308,7 +309,7 @@ export default function StepByStepScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push({ pathname: '/recipe', params: { id: recipeId } })} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="chevron-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.recipeTitle}>{recipeTitleData}</Text>
