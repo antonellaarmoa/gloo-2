@@ -135,15 +135,25 @@ export const getCustomCollections = async (userId) => {
 };
 
 // Crear una nueva colección personalizada
-export const createCustomCollection = async (userId, name, displayName) => {
+export const createCustomCollection = async (userId, name, displayName, backendId = null) => {
   try {
     const key = getCollectionsKey(userId);
     let collections = await getCustomCollections(userId);
-    // Evitar duplicados
-    if (collections.some(c => c.name === name)) return false;
+    // Normaliza el nombre para comparar igual que el backend
+    const normalizedName = name.toLowerCase().replace(/\s+/g, '-');
+    const existingIdx = collections.findIndex(c => (c.name && c.name.toLowerCase().replace(/\s+/g, '-') === normalizedName));
+    if (existingIdx !== -1) {
+      if (backendId && collections[existingIdx].id !== backendId) {
+        collections[existingIdx].id = backendId;
+        await AsyncStorage.setItem(key, JSON.stringify(collections));
+        return collections[existingIdx];
+      }
+      return collections[existingIdx];
+    }
+    // Si no existe, créala
     const newCollection = {
-      id: Date.now().toString(),
-      name,
+      id: backendId || Date.now().toString(),
+      name: normalizedName,
       displayName: displayName || name,
       recipes: [],
       createdAt: new Date().toISOString(),
@@ -162,10 +172,16 @@ export const addRecipeToCustomCollection = async (userId, collectionId, recipe) 
   try {
     const key = getCollectionsKey(userId);
     let collections = await getCustomCollections(userId);
-    const idx = collections.findIndex(c => c.id === collectionId);
-    if (idx === -1) return false;
+    const idx = collections.findIndex(c => c.id == collectionId);
+    if (idx === -1) {
+      console.log('DEBUG: Colección no encontrada en local', { collectionId, collections });
+      return false;
+    }
     // Evitar duplicados
-    if (collections[idx].recipes.some(r => r.id === recipe.id)) return false;
+    if (collections[idx].recipes.some(r => r.id == recipe.id)) {
+      console.log('DEBUG: Receta ya existe en la colección', { recipeId: recipe.id, collection: collections[idx] });
+      return false;
+    }
     // Asegurar que la receta tenga todos los datos necesarios
     const safeRecipe = {
       id: recipe.id,
@@ -183,6 +199,7 @@ export const addRecipeToCustomCollection = async (userId, collectionId, recipe) 
     };
     collections[idx].recipes.push(safeRecipe);
     await AsyncStorage.setItem(key, JSON.stringify(collections));
+    console.log('DEBUG: Receta agregada correctamente a la colección', { collectionId, recipeId: recipe.id });
     return true;
   } catch (error) {
     console.error('Error adding recipe to custom collection:', error);

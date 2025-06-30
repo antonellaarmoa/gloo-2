@@ -6,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection } from '../../utils/favoritesManager';
+import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection, isRecipeFavorite } from '../../utils/favoritesManager';
+import { API_URLS, apiRequest } from '../../config/api';
 
 const { height, width } = Dimensions.get('window');
 
@@ -172,6 +173,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
+  const [customCollections, setCustomCollections] = useState([]);
 
   // Debug log for comments
   console.log(`Recipe ${item.id} (${item.title}): comments = ${item.comments}, rates = ${item.rates}`);
@@ -263,9 +265,9 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
       // Quitar de favoritos en backend
       const ok = await toggleSaveBackend(item.id, userId, true);
       if (ok) {
-        await removeFromFavorites(userId, item.id);
+        await removeRecipeFromFavoritesBackend(userId, item.id);
         onSaveToggle(item.id, false);
-        refreshProfileFavorites();
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
         setTimeout(() => refreshProfileFavorites(), 500);
       }
     } else {
@@ -325,90 +327,190 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
     }
   };
 
-  // Sobrescribir fetchUserCollections para usar solo frontend para colecciones personalizadas
+  // Obtener colecciones del backend
   const fetchUserCollections = async () => {
     setLoadingCollections(true);
     try {
-      let collections = await getCustomCollections(userId);
-      // Filtrar colecciones no válidas para el modal:
-      collections = collections.filter(
-        c => !['Favoritos', 'jsjsjs', 'Salty', 'Dulce'].includes(c.name) &&
-             !['Favoritos', 'jsjsjs', 'Salty', 'Dulce'].includes(c.displayName)
-      );
+      const res = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+      let collections = [];
+      if (res.success && Array.isArray(res.data?.data)) {
+        collections = res.data.data;
+      }
       setUserCollections(collections);
     } catch (error) {
-      console.error('Error fetching collections:', error);
       setUserCollections([]);
     } finally {
       setLoadingCollections(false);
     }
   };
 
-  // Guardar receta en una colección personalizada (solo frontend)
-  const saveRecipeToCollection = async (collectionId = null, collectionName = null) => {
-    if (!userId) return;
-    setSavingRecipe(true);
+  // Obtener colecciones personalizadas locales
+  const fetchCustomCollections = async () => {
+    const collections = await getCustomCollections(userId);
+    setCustomCollections(collections);
+  };
+
+  // Guardar en Favoritos (backend)
+  const saveRecipeToFavoritesBackend = async () => {
+    console.log('DEBUG: Guardando en Favoritos (backend)', { userId, recipeId: item.id });
     try {
-      if (collectionId && collectionId !== 'all') {
-        // Guardar en colección personalizada (solo frontend)
-        const ok = await addRecipeToCustomCollection(userId, collectionId, item);
-        if (ok) {
-          onSaveToggle(item.id, true);
-          setShowSaveModal(false);
-          setSelectedCollection(null);
-          setNewCollectionName('');
-          refreshProfileFavorites();
-          setTimeout(() => refreshProfileFavorites(), 500);
-          Alert.alert('¡Éxito!', 'Receta guardada en la colección');
+      const res = await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+        method: 'POST',
+        body: JSON.stringify({ recipeId: item.id }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      console.log('DEBUG: Respuesta backend Favoritos', res);
+      return res.success;
+    } catch (e) {
+      console.log('DEBUG: Error guardando en Favoritos', e);
+      return false;
+    }
+  };
+
+  // Sincroniza colecciones backend→local
+  const syncBackendCollectionsToLocal = async () => {
+    const res = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+    if (res.success && Array.isArray(res.data?.data)) {
+      const backendCollections = res.data.data;
+      let localCollections = await getCustomCollections(userId);
+      for (const col of backendCollections) {
+        const normalizedName = col.name.toLowerCase().replace(/\s+/g, '-');
+        const idx = localCollections.findIndex(c => (c.name && c.name.toLowerCase().replace(/\s+/g, '-') === normalizedName));
+        if (idx === -1) {
+          // No existe en local, créala
+          await createCustomCollection(userId, normalizedName, col.name, col.id);
         } else {
-          Alert.alert('Error', 'No se pudo guardar la receta (puede que ya esté en la colección)');
-        }
-      } else if (collectionName) {
-        // Crear nueva colección personalizada y guardar receta
-        const newCol = await createCustomCollection(userId, collectionName.toLowerCase().replace(/\s+/g, '-'), collectionName);
-        if (newCol) {
-          await addRecipeToCustomCollection(userId, newCol.id, item);
-          fetchUserCollections();
-          onSaveToggle(item.id, true);
-          setShowSaveModal(false);
-          setSelectedCollection(null);
-          setNewCollectionName('');
-          refreshProfileFavorites();
-          setTimeout(() => refreshProfileFavorites(), 500);
-          Alert.alert('¡Éxito!', 'Colección creada y receta guardada');
-        } else {
-          Alert.alert('Error', 'No se pudo crear la colección (puede que ya exista)');
-        }
-      } else {
-        // Guardar en favoritos (backend)
-        const endpoint = `${API_BASE_URL}/collections/${userId}/default/recipes`;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ recipeId: item.id })
-        });
-        if (res.ok) {
-          onSaveToggle(item.id, true);
-          setShowSaveModal(false);
-          setSelectedCollection(null);
-          setNewCollectionName('');
-          try { await addToFavorites(userId, item); } catch (localError) { console.log('Error saving to local favorites:', localError); }
-          refreshProfileFavorites();
-          setTimeout(() => refreshProfileFavorites(), 500);
-          Alert.alert('¡Éxito!', 'Receta guardada en favoritos');
-        } else {
-          const errorData = await res.text();
-          let errorMessage = 'Error al guardar la receta';
-          try { const errorJson = JSON.parse(errorData); errorMessage = errorJson.error || errorJson.message || errorMessage; } catch (e) { errorMessage = errorData || errorMessage; }
-          throw new Error(errorMessage);
+          // Existe, actualiza id si es necesario
+          if (localCollections[idx].id != col.id) {
+            localCollections[idx].id = col.id;
+            await AsyncStorage.setItem(getCollectionsKey(userId), JSON.stringify(localCollections));
+          }
         }
       }
+    }
+  };
+
+  // Guardar receta en cualquier colección personalizada (solo local)
+  const saveRecipeToAnyCollection = async (collectionId) => {
+    // 1. Guardar en local
+    await saveRecipeToCustomCollection(collectionId);
+    // 2. Guardar en Favoritos del backend
+    try {
+      await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+        method: 'POST',
+        body: JSON.stringify({ recipeId: item.id }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      // Refrescar favoritos en el perfil
+      if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+    } catch (e) {
+      console.log('DEBUG: Error guardando en Favoritos backend', e);
+    }
+  };
+
+  // Guardar en colección personalizada local
+  const saveRecipeToCustomCollection = async (collectionId) => {
+    console.log('DEBUG: Guardando en colección personalizada', { userId, collectionId, item });
+    if (!userId || !collectionId) return;
+    setSavingRecipe(true);
+    try {
+      const safeRecipe = {
+        id: item.id,
+        title: item.title || 'Sin título',
+        description: item.description || 'Sin descripción',
+        image: item.image || item.imageUrl || '',
+        imageUrl: item.imageUrl || item.image || '',
+        averageRating: item.averageRating || item.rating || 4.2,
+        estimatedTime: item.estimatedTime || item.duration || 30,
+        user: item.user ? {
+          id: item.user.id || '',
+          username: item.user.username || '',
+          imageUrl: item.user.imageUrl || ''
+        } : null,
+      };
+      const ok = await addRecipeToCustomCollection(userId, collectionId, safeRecipe);
+      console.log('DEBUG: Resultado addRecipeToCustomCollection', ok);
+      // DEBUG: Mostrar colecciones locales después de guardar
+      const debugCollections = await getCustomCollections(userId);
+      console.log('DEBUG: Colecciones locales después de guardar', debugCollections);
+      if (ok) {
+        // --- NUEVO: Asegurar que la receta esté en favoritos local y backend ---
+        const isFav = await isRecipeFavorite(userId, item.id);
+        if (!isFav) {
+          await addToFavorites(userId, item); // local
+          await saveRecipeToFavoritesBackend(); // backend
+        }
+        setShowSaveModal(false);
+        setSelectedCollection(null);
+        setNewCollectionName('');
+        await fetchCustomCollections();
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        Alert.alert('¡Éxito!', 'Receta guardada en la colección');
+        onSaveToggle(item.id, true);
+      } else {
+        Alert.alert('Error', 'No se pudo guardar la receta (puede que ya esté en la colección)');
+      }
     } catch (error) {
-      console.error('Error saving recipe:', error);
-      Alert.alert('Error', `No se pudo guardar la receta: ${error.message}`);
+      console.log('DEBUG: Error guardando en colección personalizada', error);
+      Alert.alert('Error', 'No se pudo guardar la receta');
     } finally {
       setSavingRecipe(false);
     }
+  };
+
+  // Crear colección: backend y local
+  const handleCreateCollectionAndSave = async (name, icon = 'folder', recipe) => {
+    console.log('DEBUG: Creando colección y guardando receta', { userId, name, icon, recipe });
+    if (!userId || !name.trim()) return;
+    try {
+      // 1. Crear en backend
+      const body = {
+        name: name.trim(),
+        icon: icon.trim() || 'folder',
+        color: '#E2773C',
+        description: '',
+        isPublic: 'false',
+      };
+      const res = await apiRequest(API_URLS.COLLECTIONS.CREATE(userId), {
+        method: 'POST',
+        body: JSON.stringify(body),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      console.log('DEBUG: Respuesta backend crear colección', res);
+      if (res.success && res.data && res.data.data && res.data.data.id) {
+        // 2. Crear en local usando el id real del backend
+        const localCol = await createCustomCollection(userId, name.trim(), name.trim(), res.data.data.id);
+        console.log('DEBUG: Resultado createCustomCollection local', localCol);
+        await fetchCustomCollections();
+        await fetchUserCollections();
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        // 3. Espera a que la colección esté en local y guarda la receta
+        await syncBackendCollectionsToLocal();
+        await saveRecipeToCustomCollection(res.data.data.id);
+        // --- NUEVO: Asegurar que la receta esté en favoritos local y backend ---
+        const isFav = await isRecipeFavorite(userId, item.id);
+        if (!isFav) {
+          await addToFavorites(userId, item); // local
+          await saveRecipeToFavoritesBackend(); // backend
+        }
+        // FEEDBACK INMEDIATO: actualizar estado del botón
+        onSaveToggle(item.id, true);
+      }
+    } catch (e) {
+      console.log('DEBUG: Error creando colección', e);
+    }
+  };
+
+  // Eliminar colección: backend y local
+  const handleDeleteCollection = async (collectionId) => {
+    if (!userId) return;
+    try {
+      const res = await apiRequest(API_URLS.COLLECTIONS.DELETE(userId, collectionId), { method: 'DELETE' });
+      await deleteCustomCollection(userId, collectionId);
+      await fetchCustomCollections();
+      await fetchUserCollections();
+      if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+    } catch {}
   };
 
   // Función para manejar follow/unfollow
@@ -574,26 +676,6 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
               <View style={styles.saveModalCollections}>
                 <Text style={styles.saveModalSectionTitle}>Guardar en:</Text>
                 
-                {/* Option: All publications (favorites) */}
-                <TouchableOpacity 
-                  style={[
-                    styles.saveModalCollectionItem,
-                    selectedCollection === 'all' && styles.saveModalCollectionItemSelected
-                  ]}
-                  onPress={() => setSelectedCollection('all')}
-                >
-                  <View style={styles.saveModalCollectionIcon}>
-                    <Ionicons name="heart" size={20} color="#f97316" />
-                  </View>
-                  <View style={styles.saveModalCollectionInfo}>
-                    <Text style={styles.saveModalCollectionName}>Todas las publicaciones</Text>
-                    <Text style={styles.saveModalCollectionDescription}>Guardar en favoritos</Text>
-                  </View>
-                  {selectedCollection === 'all' && (
-                    <Ionicons name="checkmark-circle" size={24} color="#f97316" />
-                  )}
-                </TouchableOpacity>
-                
                 {/* Existing collections (only if user has them) */}
                 {loadingCollections ? (
                   <View style={styles.saveModalLoading}>
@@ -672,14 +754,12 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
                 styles.saveModalButtonDisabled
               ]}
               onPress={() => {
-                if (selectedCollection === 'all') {
-                  saveRecipeToCollection();
-                } else if (selectedCollection === 'new') {
+                if (selectedCollection === 'new') {
                   if (newCollectionName.trim()) {
-                    saveRecipeToCollection(null, newCollectionName.trim());
+                    handleCreateCollectionAndSave(newCollectionName.trim(), 'folder', item);
                   }
                 } else if (selectedCollection) {
-                  saveRecipeToCollection(selectedCollection);
+                  saveRecipeToAnyCollection(selectedCollection);
                 }
               }}
               disabled={!selectedCollection || (selectedCollection === 'new' && !newCollectionName.trim()) || savingRecipe}
@@ -881,15 +961,15 @@ export default function HomeScreen() {
           // Agregar a favoritos si no existe
           const recipe = data?.find(r => r.id === recipeId);
           if (recipe) {
-            await addToFavorites(userId, recipe);
+            await saveRecipeToFavoritesBackend();
           }
         } else {
           // Remover de favoritos
-          await removeFromFavorites(userId, recipeId);
+          await removeRecipeFromFavoritesBackend(userId, recipeId);
         }
         
         // Refrescar favoritos en el perfil
-        refreshProfileFavorites();
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
       } catch (error) {
         console.log('Error syncing with local favorites:', error);
       }
@@ -1700,3 +1780,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
 });
+
+// Función para agregar receta a favoritos en el backend
+const addRecipeToFavoritesBackend = async (userId, recipeId) => {
+  try {
+    const res = await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+      method: 'POST',
+      body: JSON.stringify({ recipeId }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.success;
+  } catch (e) {
+    return false;
+  }
+};
+
+// Función para eliminar receta de favoritos en el backend
+const removeRecipeFromFavoritesBackend = async (userId, recipeId) => {
+  try {
+    const res = await apiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+      method: 'DELETE',
+      body: JSON.stringify({ recipeId }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    return res.success;
+  } catch (e) {
+    return false;
+  }
+};
