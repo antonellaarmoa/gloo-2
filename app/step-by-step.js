@@ -68,6 +68,9 @@ export default function StepByStepScreen() {
   // Si viene el id, buscar del backend, si no, usar los datos serializados (para compatibilidad)
   const recipeId = id || (post && JSON.parse(post)?.id);
   
+  // Estado para controlar errores de imágenes
+  const [imageErrors, setImageErrors] = useState({});
+  
   console.log('=== STEP BY STEP DEBUG ===');
   console.log('Received params:', { steps, stepImages, recipeTitle, stepIngredients, post, id });
   console.log('Recipe ID calculated:', recipeId);
@@ -121,33 +124,55 @@ export default function StepByStepScreen() {
 
   // Procesar imágenes por paso
   const processedStepImages = [];
-  if (Array.isArray(recipe?.stepImages) && recipe.stepImages.length > 0) {
-    // Si hay stepImages específicos del backend, usarlos
-    processedStepImages.push(...recipe.stepImages.map(img => {
-      if (typeof img === 'string') {
-        return img;
-      } else if (typeof img === 'object' && img.image) {
-        return img.image;
+  if (recipe?.instructions && Array.isArray(recipe.instructions) && recipe.instructions.length > 0) {
+    // Si hay instrucciones del backend, usar la imagen de cada instrucción
+    processedStepImages.push(...recipe.instructions.map(inst => {
+      if (inst.image) {
+        // Si es una URL de Unsplash, usar null para que se use imagen por defecto
+        if (inst.image.includes('unsplash.com')) {
+          console.log('Detected Unsplash URL, using fallback image:', inst.image);
+          return null;
+        }
+        console.log('Using instruction image:', inst.image);
+        return inst.image;
       } else {
+        console.log('No image for instruction:', inst.description);
         return null;
       }
     }));
   } else if (Array.isArray(stepImagesData) && stepImagesData.length > 0) {
-    // Si hay stepImages pasados por parámetros, usarlos
+    // Si hay stepImages pasados por parámetros, usarlos (para compatibilidad)
     processedStepImages.push(...stepImagesData.map(img => {
       if (typeof img === 'string') {
+        // Si es una URL de Unsplash, usar null
+        if (img.includes('unsplash.com')) {
+          console.log('Detected Unsplash URL in stepImages, using fallback:', img);
+          return null;
+        }
         return img;
       } else if (typeof img === 'object' && img.image) {
+        if (img.image.includes('unsplash.com')) {
+          console.log('Detected Unsplash URL in stepImages object, using fallback:', img.image);
+          return null;
+        }
         return img.image;
       } else {
         return null;
       }
     }));
   } else {
-    // Si no hay stepImages específicos, usar la imagen principal de la receta
+    // Si no hay imágenes específicas, usar la imagen principal de la receta
     const mainImage = recipe?.image || null;
-    for (let i = 0; i < processedSteps.length; i++) {
-      processedStepImages.push(mainImage);
+    // Si la imagen principal es de Unsplash, usar null
+    if (mainImage && mainImage.includes('unsplash.com')) {
+      console.log('Detected Unsplash URL in main image, using fallback:', mainImage);
+      for (let i = 0; i < processedSteps.length; i++) {
+        processedStepImages.push(null);
+      }
+    } else {
+      for (let i = 0; i < processedSteps.length; i++) {
+        processedStepImages.push(mainImage);
+      }
     }
   }
 
@@ -199,6 +224,8 @@ export default function StepByStepScreen() {
     `Step ${index + 1}: ${img ? 'Has image' : 'No image'}`
   ));
 
+  console.log('Processed step ingredients:', processedStepIngredients);
+
   const [currentStep, setCurrentStep] = useState(0);
   const progress = ((currentStep + 1) / processedSteps.length) * 100;
   const currentIngredients = processedStepIngredients[currentStep] || [];
@@ -221,11 +248,11 @@ export default function StepByStepScreen() {
   console.log('Step images:', recipe?.stepImages);
   console.log('Main image:', recipe?.image);
 
-  console.log('Processed step ingredients:', processedStepIngredients);
-
   const handleNext = () => {
     if (currentStep < processedSteps.length - 1) {
       setCurrentStep(prev => prev + 1);
+      // Limpiar error de imagen del paso anterior
+      setImageErrors(prev => ({ ...prev, [currentStep]: false }));
     } else {
       router.push('/finish');
     }
@@ -234,6 +261,8 @@ export default function StepByStepScreen() {
   const handleBack = () => {
     if (currentStep > 0) {
       setCurrentStep(prev => prev - 1);
+      // Limpiar error de imagen del paso anterior
+      setImageErrors(prev => ({ ...prev, [currentStep]: false }));
     }
   };
 
@@ -287,6 +316,12 @@ export default function StepByStepScreen() {
     
     console.log('Getting image for step', currentStep, ':', currentImage);
     
+    // Si hay un error de imagen para este paso, usar imagen por defecto
+    if (imageErrors[currentStep]) {
+      console.log('Using fallback image due to previous error');
+      return require('../assets/avocado-toast.jpg');
+    }
+    
     if (!currentImage) {
       console.log('No image for current step, using fallback');
       return require('../assets/avocado-toast.jpg');
@@ -325,8 +360,11 @@ export default function StepByStepScreen() {
           source={getCurrentStepImageSource()}
           style={styles.image}
           resizeMode="cover"
-          onError={(error) => console.log('Image loading error:', error.nativeEvent)}
-          onLoad={() => console.log('Image loaded successfully')}
+          onError={(error) => {
+            console.log('Image loading error for step', currentStep, ':', error.nativeEvent);
+            setImageErrors(prev => ({ ...prev, [currentStep]: true }));
+          }}
+          onLoad={() => console.log('Image loaded successfully for step', currentStep)}
         />
         <View style={styles.stepContainer}>
           <View style={styles.stepCircle}><Text style={styles.stepCircleText}>{currentStep + 1}</Text></View>

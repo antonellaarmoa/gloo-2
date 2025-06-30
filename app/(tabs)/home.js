@@ -1,18 +1,55 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity, Modal, ActivityIndicator, Alert, Animated, Easing, TextInput, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity, Modal, ActivityIndicator, Alert, Animated, Easing, TextInput, ScrollView, Share } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection, isRecipeFavorite } from '../../utils/favoritesManager';
-import { API_URLS, apiRequest } from '../../config/api';
+import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection, isRecipeFavorite, forceSyncFavorites, repairFavorites } from '../../utils/favoritesManager';
+import { API_URLS } from '../../config/api';
+import SaveRecipeModal from '../../components/SaveRecipeModal';
+import LikeButton from '../../components/LikeButton';
 
 const { height, width } = Dimensions.get('window');
 
 const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
 const API_BASE_URL = 'https://gloo-api-production.up.railway.app/api/v1';
+
+// Función robusta para hacer peticiones a la API
+const makeApiRequest = async (url, options = {}) => {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      ...options,
+    });
+    
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Error parsing JSON response:', parseError);
+      data = null;
+    }
+    
+    return {
+      success: response.ok,
+      status: response.status,
+      data,
+      response,
+    };
+  } catch (error) {
+    console.error(`API request failed for ${url}:`, error);
+    return {
+      success: false,
+      error,
+      status: 0,
+    };
+  }
+};
 
 function fetchRecipes() {
   return fetch(API_URL)
@@ -159,17 +196,19 @@ const loadFollowedUsersLocally = async () => {
   }
 };
 
-function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle, savedRecipes, onSaveToggle, followedUsers, onFollowToggle }) {
+function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes, savedRecipes, onSaveToggle, followedUsers, onFollowToggle }) {
   const [likeCount, setLikeCount] = useState(Math.max(0, item.rates || 0));
+  const [likeLoading, setLikeLoading] = useState(false);
   const [isShared, setIsShared] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
+  const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [userCollections, setUserCollections] = useState([]);
   const [loadingCollections, setLoadingCollections] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
-  const [selectedCollection, setSelectedCollection] = useState(null);
   const [savingRecipe, setSavingRecipe] = useState(false);
+  const [localSavedState, setLocalSavedState] = useState(savedRecipes[item.id] || false);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
@@ -177,6 +216,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
 
   // Debug log for comments
   console.log(`Recipe ${item.id} (${item.title}): comments = ${item.comments}, rates = ${item.rates}`);
+
+  // Sincronizar estado local con estado global
+  React.useEffect(() => {
+    setLocalSavedState(savedRecipes[item.id] || false);
+  }, [savedRecipes[item.id]]);
 
   // Verificar si el usuario ya dio like
   const liked = userLikes[item.id] || false;
@@ -213,6 +257,9 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
     // Usar la imagen real de la receta si existe
     if (item.image && item.image !== 'null' && item.image !== '') {
       return { uri: item.image };
+    }
+    if (item.media && item.media !== 'null' && item.media !== '') {
+      return { uri: item.media };
     }
     // Fallbacks
     const title = item.title?.toLowerCase() || '';
@@ -261,28 +308,108 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
 
   const toggleSaved = async () => {
     if (!userId) return;
-    if (isSaved) {
-      // Quitar de favoritos en backend
-      const ok = await toggleSaveBackend(item.id, userId, true);
-      if (ok) {
-        await removeRecipeFromFavoritesBackend(userId, item.id);
+    
+    // Mostrar indicador de carga
+    const loadingKey = `saving_${item.id}`;
+    if (global[loadingKey]) return; // Evitar múltiples clicks
+    global[loadingKey] = true;
+    
+    try {
+      if (localSavedState) {
+        // Quitar de favoritos
+        console.log('Removing from favorites:', item.title);
+        
+        // Actualizar estado local inmediatamente para feedback visual
+        setLocalSavedState(false);
+        
+        // Remover del local primero
+        const localRemoved = await removeFromFavorites(userId, item.id);
+        
+        // Remover del backend
+        const backendRemoved = await makeApiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+          method: 'DELETE',
+          body: JSON.stringify({ recipeId: item.id }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        
+        // Actualizar estado global
         onSaveToggle(item.id, false);
-        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
-        setTimeout(() => refreshProfileFavorites(), 500);
+        
+        // Refrescar perfil
+        if (global.refreshProfileFavorites) {
+          global.refreshProfileFavorites();
+        }
+        
+        console.log('Recipe removed from favorites:', { localRemoved, backendRemoved });
+      } else {
+        // Agregar a favoritos directamente
+        console.log('Adding to favorites:', item.title);
+        
+        // Actualizar estado local inmediatamente para feedback visual
+        setLocalSavedState(true);
+        
+        // Agregar al local primero
+        const localAdded = await addToFavorites(userId, item);
+        
+        // Agregar al backend
+        const backendAdded = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+          method: 'POST',
+          body: JSON.stringify({ recipeId: item.id }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        
+        if (localAdded || backendAdded) {
+          // Actualizar estado global
+          onSaveToggle(item.id, true);
+          
+          // Refrescar perfil
+          if (global.refreshProfileFavorites) {
+            global.refreshProfileFavorites();
+          }
+          
+          console.log('Recipe added to favorites:', { localAdded, backendAdded });
+        } else {
+          // Si falló, revertir el estado local
+          setLocalSavedState(false);
+        }
       }
-    } else {
-      // Si no está guardada, abrir modal para elegir favoritos o colección
-      await fetchUserCollections();
-      setShowSaveModal(true);
+    } catch (error) {
+      console.error('Error toggling favorites:', error);
+      Alert.alert('Error', 'No se pudo actualizar favoritos');
+      // Revertir estado local en caso de error
+      setLocalSavedState(!localSavedState);
+    } finally {
+      // Limpiar indicador de carga
+      delete global[loadingKey];
     }
   };
 
-  const toggleShared = () => {
+  const toggleShared = async () => {
     if (isGuest) {
       onGuestLimit();
       return;
     }
-    setIsShared(!isShared);
+
+    try {
+      const shareContent = {
+        title: item.title || 'Receta de Gloo',
+        message: `¡Mira esta deliciosa receta: ${item.title}!\n\n${item.description || 'Una receta increíble para compartir.'}\n\nDescarga Gloo para más recetas: https://gloo.app`,
+        url: `https://gloo.app/recipe/${item.id}`, // URL de la receta
+      };
+
+      const result = await Share.share(shareContent, {
+        dialogTitle: 'Compartir receta',
+      });
+
+      if (result.action === Share.sharedAction) {
+        setIsShared(true);
+        // Resetear después de 2 segundos
+        setTimeout(() => setIsShared(false), 2000);
+      }
+    } catch (error) {
+      console.error('Error sharing recipe:', error);
+      Alert.alert('Error', 'No se pudo compartir la receta');
+    }
   };
 
   const handleViewRecipe = () => {
@@ -331,7 +458,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   const fetchUserCollections = async () => {
     setLoadingCollections(true);
     try {
-      const res = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
       let collections = [];
       if (res.success && Array.isArray(res.data?.data)) {
         collections = res.data.data;
@@ -350,26 +477,9 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
     setCustomCollections(collections);
   };
 
-  // Guardar en Favoritos (backend)
-  const saveRecipeToFavoritesBackend = async () => {
-    console.log('DEBUG: Guardando en Favoritos (backend)', { userId, recipeId: item.id });
-    try {
-      const res = await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
-        method: 'POST',
-        body: JSON.stringify({ recipeId: item.id }),
-        headers: { 'Content-Type': 'application/json' },
-      });
-      console.log('DEBUG: Respuesta backend Favoritos', res);
-      return res.success;
-    } catch (e) {
-      console.log('DEBUG: Error guardando en Favoritos', e);
-      return false;
-    }
-  };
-
   // Sincroniza colecciones backend→local
   const syncBackendCollectionsToLocal = async () => {
-    const res = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+    const res = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
     if (res.success && Array.isArray(res.data?.data)) {
       const backendCollections = res.data.data;
       let localCollections = await getCustomCollections(userId);
@@ -396,7 +506,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
     await saveRecipeToCustomCollection(collectionId);
     // 2. Guardar en Favoritos del backend
     try {
-      await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+      await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
         method: 'POST',
         body: JSON.stringify({ recipeId: item.id }),
         headers: { 'Content-Type': 'application/json' },
@@ -438,10 +548,14 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
         const isFav = await isRecipeFavorite(userId, item.id);
         if (!isFav) {
           await addToFavorites(userId, item); // local
-          await saveRecipeToFavoritesBackend(); // backend
+          await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+            method: 'POST',
+            body: JSON.stringify({ recipeId: item.id }),
+            headers: { 'Content-Type': 'application/json' },
+          }); // backend
         }
         setShowSaveModal(false);
-        setSelectedCollection(null);
+        setSelectedRecipe(null);
         setNewCollectionName('');
         await fetchCustomCollections();
         if (global.refreshProfileFavorites) global.refreshProfileFavorites();
@@ -471,7 +585,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
         description: '',
         isPublic: 'false',
       };
-      const res = await apiRequest(API_URLS.COLLECTIONS.CREATE(userId), {
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.CREATE(userId), {
         method: 'POST',
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
@@ -491,7 +605,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
         const isFav = await isRecipeFavorite(userId, item.id);
         if (!isFav) {
           await addToFavorites(userId, item); // local
-          await saveRecipeToFavoritesBackend(); // backend
+          await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+            method: 'POST',
+            body: JSON.stringify({ recipeId: item.id }),
+            headers: { 'Content-Type': 'application/json' },
+          }); // backend
         }
         // FEEDBACK INMEDIATO: actualizar estado del botón
         onSaveToggle(item.id, true);
@@ -505,7 +623,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
   const handleDeleteCollection = async (collectionId) => {
     if (!userId) return;
     try {
-      const res = await apiRequest(API_URLS.COLLECTIONS.DELETE(userId, collectionId), { method: 'DELETE' });
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.DELETE(userId, collectionId), { method: 'DELETE' });
       await deleteCustomCollection(userId, collectionId);
       await fetchCustomCollections();
       await fetchUserCollections();
@@ -619,160 +737,55 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, onLikeToggle,
             </View>
           </View>
           <View style={styles.actionsContainer}>
-            <TouchableOpacity style={styles.actionIcon} onPress={toggleLike}>
-              <Ionicons name="heart" size={30} color={liked ? '#ef4444' : 'white'} />
-              <Text style={styles.actionText}>{likeCount}</Text>
-            </TouchableOpacity>
+            <LikeButton
+              initialCount={item.likes || item.rates || 0}
+              size={30}
+              style={styles.actionIcon}
+              showCount={true}
+            />
             <TouchableOpacity style={styles.actionIcon} onPress={isGuest ? onGuestLimit : () => router.push({ pathname: '/comment', params: { id: item.id } })}>
-              <Ionicons name="chatbubble-ellipses" size={30} color="white" />
+              <View style={styles.iconContainer}>
+                <Ionicons name="chatbubble-ellipses" size={30} color="white" style={styles.icon} />
+              </View>
               <Text style={styles.actionText}>{item.comments || 0}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.actionIcon} onPress={toggleSaved}>
-              <Ionicons name="bookmark" size={30} color={isSaved ? '#fbbf24' : 'white'} />
+            <TouchableOpacity
+              style={[styles.actionIcon, isGuest && { opacity: 0.5 }]}
+              onPress={() => {
+                setSelectedRecipe(item);
+                setShowSaveModal(true);
+              }}
+              disabled={isGuest}
+            >
+              <View style={[styles.iconContainer, localSavedState && styles.iconContainerSaved]}>
+                <Ionicons 
+                  name={localSavedState ? 'bookmark' : 'bookmark-outline'} 
+                  size={24} 
+                  color="white" 
+                  style={styles.icon}
+                />
+              </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionIcon} onPress={toggleShared}>
-              <Ionicons name="arrow-redo" size={30} color={isShared ? '#10b981' : 'white'} />
+              <View style={[styles.iconContainer, isShared && styles.iconContainerShared]}>
+                <Ionicons name="arrow-redo" size={30} color="white" style={styles.icon} />
+              </View>
             </TouchableOpacity>
           </View>
         </View>
       </View>
       
-      {/* Modal para guardar en colección */}
-      <Modal
+      <SaveRecipeModal
         visible={showSaveModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowSaveModal(false)}
-      >
-        <View style={styles.saveModalOverlay}>
-          <View style={styles.saveModalContent}>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {/* Header */}
-              <View style={styles.saveModalHeader}>
-                <Text style={styles.saveModalTitle}>Guardar receta</Text>
-                <TouchableOpacity 
-                  onPress={() => setShowSaveModal(false)}
-                  style={styles.saveModalCloseButton}
-                >
-                  <Ionicons name="close" size={24} color="#666" />
-                </TouchableOpacity>
-              </View>
-              
-              {/* Recipe info */}
-              <View style={styles.saveModalRecipeInfo}>
-                <Image 
-                  source={getRecipeImageSource()} 
-                  style={styles.saveModalRecipeImage}
-                />
-                <View style={styles.saveModalRecipeText}>
-                  <Text style={styles.saveModalRecipeTitle}>{item.title}</Text>
-                  <Text style={styles.saveModalRecipeDescription}>
-                    {item.description || 'Sin descripción'}
-                  </Text>
-                </View>
-              </View>
-              
-              {/* Collections list */}
-              <View style={styles.saveModalCollections}>
-                <Text style={styles.saveModalSectionTitle}>Guardar en:</Text>
-                
-                {/* Existing collections (only if user has them) */}
-                {loadingCollections ? (
-                  <View style={styles.saveModalLoading}>
-                    <ActivityIndicator size="small" color="#f97316" />
-                    <Text style={styles.saveModalLoadingText}>Cargando colecciones...</Text>
-                  </View>
-                ) : userCollections.length > 0 ? (
-                  userCollections.map((collection) => (
-                    <TouchableOpacity 
-                      key={collection.id}
-                      style={[
-                        styles.saveModalCollectionItem,
-                        selectedCollection === collection.id && styles.saveModalCollectionItemSelected
-                      ]}
-                      onPress={() => setSelectedCollection(collection.id)}
-                    >
-                      <View style={styles.saveModalCollectionIcon}>
-                        <Ionicons name="folder" size={20} color="#10b981" />
-                      </View>
-                      <View style={styles.saveModalCollectionInfo}>
-                        <Text style={styles.saveModalCollectionName}>
-                          {collection.displayName || collection.name}
-                        </Text>
-                        <Text style={styles.saveModalCollectionDescription}>
-                          {collection.recipeCount || 0} recetas
-                        </Text>
-                      </View>
-                      {selectedCollection === collection.id && (
-                        <Ionicons name="checkmark-circle" size={24} color="#f97316" />
-                      )}
-                    </TouchableOpacity>
-                  ))
-                ) : null}
-                
-                {/* Option: Create new collection */}
-                <TouchableOpacity 
-                  style={[
-                    styles.saveModalCollectionItem,
-                    selectedCollection === 'new' && styles.saveModalCollectionItemSelected
-                  ]}
-                  onPress={() => setSelectedCollection('new')}
-                >
-                  <View style={styles.saveModalCollectionIcon}>
-                    <Ionicons name="add-circle" size={20} color="#3b82f6" />
-                  </View>
-                  <View style={styles.saveModalCollectionInfo}>
-                    <Text style={styles.saveModalCollectionName}>Crear nueva colección</Text>
-                    <Text style={styles.saveModalCollectionDescription}>Organizar tus recetas</Text>
-                  </View>
-                  {selectedCollection === 'new' && (
-                    <Ionicons name="checkmark-circle" size={24} color="#f97316" />
-                  )}
-                </TouchableOpacity>
-              </View>
-              
-              {/* New collection input */}
-              {selectedCollection === 'new' && (
-                <View style={styles.saveModalNewCollection}>
-                  <Text style={styles.saveModalSectionTitle}>Nombre de la colección:</Text>
-                  <TextInput
-                    style={styles.saveModalInput}
-                    placeholder="Ej: Postres favoritos"
-                    value={newCollectionName}
-                    onChangeText={setNewCollectionName}
-                    maxLength={50}
-                  />
-                </View>
-              )}
-            </ScrollView>
-            
-            {/* Save button - fuera del ScrollView */}
-            <TouchableOpacity 
-              style={[
-                styles.saveModalButton,
-                (!selectedCollection || (selectedCollection === 'new' && !newCollectionName.trim()) || savingRecipe) && 
-                styles.saveModalButtonDisabled
-              ]}
-              onPress={() => {
-                if (selectedCollection === 'new') {
-                  if (newCollectionName.trim()) {
-                    handleCreateCollectionAndSave(newCollectionName.trim(), 'folder', item);
-                  }
-                } else if (selectedCollection) {
-                  saveRecipeToAnyCollection(selectedCollection);
-                }
-              }}
-              disabled={!selectedCollection || (selectedCollection === 'new' && !newCollectionName.trim()) || savingRecipe}
-            >
-              {savingRecipe ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.saveModalButtonText}>Guardar</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowSaveModal(false)}
+        recipe={selectedRecipe}
+        userId={userId}
+        onSaved={(recipeId, isSaved) => {
+          setShowSaveModal(false);
+          setLocalSavedState(isSaved);
+          if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        }}
+      />
     </ImageBackground>
   );
 }
@@ -880,12 +893,20 @@ export default function HomeScreen() {
           try {
             const combinedSaved = await syncFavoritesWithSavedState(userId, saved);
             setSavedRecipes(combinedSaved);
+            console.log('Favorites synced with saved state:', Object.keys(combinedSaved).length, 'recipes');
           } catch (error) {
-            console.log('Error syncing with favorites:', error);
+            console.error('Error syncing with favorites:', error);
           }
         };
         
         syncWithFavorites();
+        
+        // Reparar favoritos si es necesario
+        repairFavorites(userId).then(repaired => {
+          if (repaired.length > 0) {
+            console.log('Favorites repaired:', repaired.length, 'recipes');
+          }
+        });
       });
       loadFollowedUsersLocally().then(followed => setFollowedUsers(followed));
     }
@@ -948,30 +969,72 @@ export default function HomeScreen() {
     await saveLikesLocally(newLikes);
   };
 
+  // Función para agregar a favoritos backend (scope global)
+  const addRecipeToFavoritesBackend = async (userId, recipeId) => {
+    try {
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+        method: 'POST',
+        body: JSON.stringify({ recipeId: recipeId }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      console.log('Backend add to favorites response:', res);
+      return res.success;
+    } catch (error) {
+      console.error('Error adding to favorites backend:', error);
+      return false;
+    }
+  };
+
+  // Función para remover de favoritos backend (scope global)
+  const removeRecipeFromFavoritesBackend = async (userId, recipeId) => {
+    try {
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+        method: 'DELETE',
+        body: JSON.stringify({ recipeId: recipeId }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+      console.log('Backend remove from favorites response:', res);
+      return res.success;
+    } catch (error) {
+      console.error('Error removing from favorites backend:', error);
+      return false;
+    }
+  };
+
   // Función para manejar cambios de guardar
   const handleSaveToggle = async (recipeId, isSaved) => {
+    console.log('handleSaveToggle called:', { recipeId, isSaved });
+    
+    // Actualizar estado local inmediatamente
     const newSaved = { ...savedRecipes, [recipeId]: isSaved };
     setSavedRecipes(newSaved);
     await saveSavedRecipesLocally(newSaved);
     
-    // Sincronizar con favoritos locales
+    // Sincronizar con favoritos locales y backend
     if (userId) {
       try {
-        if (isSaved) {
-          // Agregar a favoritos si no existe
-          const recipe = data?.find(r => r.id === recipeId);
-          if (recipe) {
-            await saveRecipeToFavoritesBackend();
-          }
-        } else {
+        const recipe = data?.find(r => r.id === recipeId);
+        
+        if (isSaved && recipe) {
+          // Agregar a favoritos
+          const localAdded = await addToFavorites(userId, recipe);
+          const backendAdded = await addRecipeToFavoritesBackend(userId, recipeId);
+          
+          console.log('Save toggle - added to favorites:', { localAdded, backendAdded });
+        } else if (!isSaved) {
           // Remover de favoritos
-          await removeRecipeFromFavoritesBackend(userId, recipeId);
+          const localRemoved = await removeFromFavorites(userId, recipeId);
+          const backendRemoved = await removeRecipeFromFavoritesBackend(userId, recipeId);
+          
+          console.log('Save toggle - removed from favorites:', { localRemoved, backendRemoved });
         }
         
         // Refrescar favoritos en el perfil
-        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        if (global.refreshProfileFavorites) {
+          global.refreshProfileFavorites();
+        }
       } catch (error) {
-        console.log('Error syncing with local favorites:', error);
+        console.error('Error syncing with favorites:', error);
       }
     }
   };
@@ -1214,7 +1277,7 @@ export default function HomeScreen() {
             onGuestLimit={() => {}}
             index={index}
             userLikes={userLikes}
-            onLikeToggle={handleLikeToggle}
+            setUserLikes={setUserLikes}
             savedRecipes={savedRecipes}
             onSaveToggle={handleSaveToggle}
             followedUsers={followedUsers}
@@ -1428,16 +1491,58 @@ const styles = StyleSheet.create({
     right: 20, 
     bottom: 250, 
     alignItems: 'center', 
+    justifyContent: 'center',
     gap: 20 
   },
   actionIcon: { 
-    alignItems: 'center' 
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    minHeight: 44,
+  },
+  iconContainer: {
+    width: 44,
+    height: 44,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  iconContainerSaved: {
+    backgroundColor: '#fbbf24',
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+    borderColor: '#ffffff',
+  },
+  iconContainerShared: {
+    backgroundColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+    borderColor: '#ffffff',
+  },
+  icon: {
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   actionText: { 
     color: 'white', 
     fontSize: 12,
-    marginTop: 6,
-    fontWeight: '500',
+    marginTop: 8,
+    fontWeight: '600',
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 2,
@@ -1781,30 +1886,4 @@ const styles = StyleSheet.create({
   },
 });
 
-// Función para agregar receta a favoritos en el backend
-const addRecipeToFavoritesBackend = async (userId, recipeId) => {
-  try {
-    const res = await apiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
-      method: 'POST',
-      body: JSON.stringify({ recipeId }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.success;
-  } catch (e) {
-    return false;
-  }
-};
 
-// Función para eliminar receta de favoritos en el backend
-const removeRecipeFromFavoritesBackend = async (userId, recipeId) => {
-  try {
-    const res = await apiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
-      method: 'DELETE',
-      body: JSON.stringify({ recipeId }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    return res.success;
-  } catch (e) {
-    return false;
-  }
-};

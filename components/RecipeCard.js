@@ -23,15 +23,25 @@ export default function RecipeCard({ recipe, onPress }) {
 
   // Obtener imagen de la receta
   const getRecipeImage = () => {
+    console.log('Imagen de la receta:', recipe.image);
     if (recipe.image && recipe.image !== 'null' && recipe.image !== '') {
       return { uri: recipe.image };
     }
+    if (recipe.media && recipe.media !== 'null' && recipe.media !== '') {
+      return { uri: recipe.media };
+    }
+    if (recipe.imageUrl && recipe.imageUrl !== 'null' && recipe.imageUrl !== '') {
+      return { uri: recipe.imageUrl };
+    }
+    // Solo usar imagen genérica si no hay ninguna imagen disponible
     return require('../assets/hamburguesa.png');
   };
 
+  const [imageError, setImageError] = React.useState(false);
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
-      <Image source={getRecipeImage()} style={styles.image} />
+      <Image source={imageError ? require('../assets/hamburguesa.png') : getRecipeImage()} style={styles.image} onError={() => setImageError(true)} />
       <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
         {recipe.title || 'Sin título'}
       </Text>

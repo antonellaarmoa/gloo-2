@@ -22,6 +22,8 @@ import { useAuth } from '@clerk/clerk-expo';
 import { useQuery } from '@tanstack/react-query';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
+import SaveRecipeModal from '../../components/SaveRecipeModal';
+import LikeButton from '../../components/LikeButton';
 
 const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
@@ -185,7 +187,6 @@ export default function RecipeScreen() {
   const [newComment, setNewComment] = useState('');
   const [isFollowing, setIsFollowing] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
   const [isShared, setIsShared] = useState(false);
   const [showGuestOverlay, setShowGuestOverlay] = useState(false);
   const [currentIngredients, setCurrentIngredients] = useState(processedIngredients);
@@ -193,6 +194,40 @@ export default function RecipeScreen() {
   const [savingRecipe, setSavingRecipe] = useState(false);
   const [loadingComments, setLoadingComments] = useState(false);
   const [submittingComment, setSubmittingComment] = useState(false);
+  // Estado global de recetas guardadas
+  const [savedRecipes, setSavedRecipes] = useState({});
+  const [likeCount, setLikeCount] = useState(parsedPost.rates || parsedPost.likes || 0);
+  const [likeLoading, setLikeLoading] = useState(false);
+
+  useEffect(() => {
+    const loadSaved = async () => {
+      const localSaved = await AsyncStorage.getItem('@gloo:savedRecipes');
+      setSavedRecipes(localSaved ? JSON.parse(localSaved) : {});
+    };
+    loadSaved();
+    // Escuchar cambios globales
+    global.refreshProfileFavorites = loadSaved;
+    return () => { global.refreshProfileFavorites = undefined; };
+  }, []);
+
+  const handleSaveToggle = async (recipeId, isSaved) => {
+    const newSaved = { ...savedRecipes, [recipeId]: isSaved };
+    setSavedRecipes(newSaved);
+    await AsyncStorage.setItem('@gloo:savedRecipes', JSON.stringify(newSaved));
+    // Sincronizar con backend
+    if (userId) {
+      try {
+        if (isSaved) {
+          await toggleSaveBackend(recipeId, userId, true);
+        } else {
+          await toggleSaveBackend(recipeId, userId, false);
+        }
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+      } catch (error) {
+        console.log('Error syncing with backend:', error);
+      }
+    }
+  };
 
   // Funciones para manejar likes, saves y follows
   const toggleLikeBackend = async (recipeId, userId, isLiked) => {
@@ -382,6 +417,9 @@ export default function RecipeScreen() {
     // Usar la imagen real de la receta si existe
     if (parsedPost.image && parsedPost.image !== 'null' && parsedPost.image !== '') {
       return { uri: parsedPost.image };
+    }
+    if (parsedPost.media && parsedPost.media !== 'null' && parsedPost.media !== '') {
+      return { uri: parsedPost.media };
     }
     // Fallbacks
     const title = parsedPost.title?.toLowerCase() || '';
@@ -633,7 +671,17 @@ export default function RecipeScreen() {
       }
       
       console.log('Modified recipe saved locally successfully');
-      setShowSaveModal(true);
+      
+      // Refrescar las recetas modificadas en el perfil
+      if (global.refreshChangedRecipes) {
+        global.refreshChangedRecipes();
+      }
+      
+      Alert.alert(
+        '¡Receta Guardada!',
+        'Tu receta modificada se ha guardado en la pestaña "Changed" de tu perfil.',
+        [{ text: 'OK' }]
+      );
       
     } catch (error) {
       console.error('Error saving modified recipe locally:', error);
@@ -649,6 +697,9 @@ export default function RecipeScreen() {
     userData.username ||
     (userData.email ? userData.email.split('@')[0] : null) ||
     'Chef Anónimo';
+
+  const isSaved = savedRecipes[recipeId] || false;
+  console.log('RecipeView isSaved:', isSaved, 'savedRecipes:', savedRecipes, 'recipeId:', recipeId);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -719,21 +770,26 @@ export default function RecipeScreen() {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
-            <TouchableOpacity 
-              style={styles.actionButton} 
-              onPress={handleLike}
-            >
-              <Ionicons 
-                name={isLiked ? "heart" : "heart-outline"} 
-                size={24} 
-                color={isLiked ? "#ef4444" : "#64748b"} 
-              />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.actionButton} onPress={handleSave}>
-              <Ionicons name={isSaved ? "bookmark" : "bookmark-outline"} size={24} color={isSaved ? "#fbbf24" : "#64748b"} />
+            <LikeButton
+              initialCount={likeCount}
+              size={24}
+              style={styles.actionButton}
+              showCount={true}
+            />
+            <TouchableOpacity onPress={() => setShowSaveModal(true)}>
+              <View style={[styles.iconContainer, isSaved && styles.iconContainerSaved]}>
+                <Ionicons
+                  name={isSaved ? 'bookmark' : 'bookmark-outline'}
+                  size={32}
+                  color="white"
+                  style={styles.icon}
+                />
+              </View>
             </TouchableOpacity>
             <TouchableOpacity style={styles.actionButton} onPress={handleShare}>
-              <Ionicons name="share-outline" size={24} color={isShared ? "#10b981" : "#64748b"} />
+              <View style={[styles.iconContainer, isShared && styles.iconContainerShared]}>
+                <Ionicons name="share-outline" size={24} color="white" style={styles.icon} />
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -795,18 +851,20 @@ export default function RecipeScreen() {
               ))}
             </View>
 
-            <TouchableOpacity 
-              style={[
-                styles.saveButton, 
-                !selectedOption && styles.saveButtonDisabled
-              ]} 
-              onPress={handleSaveModifiedRecipe}
-              disabled={!selectedOption || savingRecipe}
-            >
-              <Text style={styles.saveButtonText}>
-                {savingRecipe ? 'Guardando...' : 'Save Changed Recipe'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.saveButtonContainer}>
+              <TouchableOpacity 
+                style={[
+                  styles.saveButton, 
+                  !selectedOption && styles.saveButtonDisabled
+                ]} 
+                onPress={handleSaveModifiedRecipe}
+                disabled={!selectedOption || savingRecipe}
+              >
+                <Text style={styles.saveButtonText}>
+                  {savingRecipe ? 'Guardando...' : 'Save Changed Recipe'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Steps Section */}
@@ -969,25 +1027,16 @@ export default function RecipeScreen() {
         </Modal>
 
         {/* Save Confirmation Modal */}
-        <Modal visible={showSaveModal} animationType="fade" transparent>
-          <View style={styles.saveModalOverlay}>
-            <View style={styles.saveModalContent}>
-              <View style={styles.saveModalIcon}>
-                <Ionicons name="checkmark-circle" size={64} color="#10b981" />
-              </View>
-              <Text style={styles.saveModalTitle}>¡Receta Guardada!</Text>
-              <Text style={styles.saveModalText}>
-                La receta modificada se ha guardado en la sección "Changed" de tu perfil.
-              </Text>
-              <TouchableOpacity 
-                style={styles.saveModalButton}
-                onPress={() => setShowSaveModal(false)}
-              >
-                <Text style={styles.saveModalButtonText}>Entendido</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Modal>
+        <SaveRecipeModal
+          visible={showSaveModal}
+          onClose={() => setShowSaveModal(false)}
+          recipe={parsedPost}
+          userId={userId}
+          onSaved={(recipeId, isSaved) => {
+            setShowSaveModal(false);
+            if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+          }}
+        />
 
         {/* Overlay para guest users */}
         {showGuestOverlay && !isSignedIn && (
@@ -1127,7 +1176,49 @@ const styles = StyleSheet.create({
   actionButton: {
     backgroundColor: '#f4f3f4',
     padding: 10,
-    borderRadius: 20
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 44,
+    minHeight: 44,
+  },
+  iconContainer: {
+    width: 44,
+    height: 44,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  iconContainerSaved: {
+    backgroundColor: '#fbbf24',
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+    borderColor: '#ffffff',
+  },
+  iconContainerShared: {
+    backgroundColor: '#10b981',
+    shadowColor: '#10b981',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+    borderColor: '#ffffff',
+  },
+  icon: {
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   section: {
     marginTop: 20
@@ -1189,12 +1280,29 @@ const styles = StyleSheet.create({
   ingredientText: {
     color: '#333'
   },
+  saveButtonContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 50,
+    padding: 8,
+    marginTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
   saveButton: {
     backgroundColor: '#F9690E',
     padding: 12,
-    marginTop: 12,
     alignItems: 'center',
-    borderRadius: 50
+    borderRadius: 42,
+    shadowColor: '#F9690E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   saveButtonText: {
     color: 'white',
@@ -1405,9 +1513,13 @@ const styles = StyleSheet.create({
   saveButtonDisabled: {
     backgroundColor: '#ccc',
     padding: 12,
-    marginTop: 12,
     alignItems: 'center',
-    borderRadius: 50
+    borderRadius: 42,
+    shadowColor: '#ccc',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
   },
   saveModalOverlay: {
     flex: 1,

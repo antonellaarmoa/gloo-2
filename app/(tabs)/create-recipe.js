@@ -22,8 +22,45 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URLS } from '../../config/api';
+import { useFocusEffect } from '@react-navigation/native';
 
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
+// Función robusta para hacer peticiones a la API
+const makeApiRequest = async (url, options = {}) => {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      ...options,
+    });
+    
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Error parsing JSON response:', parseError);
+      data = null;
+    }
+    
+    return {
+      success: response.ok,
+      status: response.status,
+      data,
+      response,
+    };
+  } catch (error) {
+    console.error(`API request failed for ${url}:`, error);
+    return {
+      success: false,
+      error,
+      status: 0,
+    };
+  }
+};
+import * as ImageManipulator from 'expo-image-manipulator';
+import { Video } from 'expo-av';
 
 export default function CreateRecipeScreen() {
   const router = useRouter();
@@ -50,6 +87,30 @@ export default function CreateRecipeScreen() {
   useEffect(() => {
     loadDraft();
   }, []);
+
+  // Limpiar campos al entrar si no hay borrador
+  useFocusEffect(
+    React.useCallback(() => {
+      const checkAndClear = async () => {
+        const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
+        if (!draftData) {
+          setTitle('');
+          setDescription('');
+          setPrepTime('');
+          setCookTime('');
+          setIngredients([]);
+          setSteps([{ key: '1', text: '', media: null }]);
+          setRecipeImage(null);
+          setNewIngredient('');
+          setNewAmount('');
+          setNewUnit('');
+          setIsEditingExisting(false);
+          setRecipeId(null);
+        }
+      };
+      checkAndClear();
+    }, [])
+  );
 
   const loadDraft = async () => {
     try {
@@ -85,7 +146,7 @@ export default function CreateRecipeScreen() {
 
   const deleteRecipeFromBackend = async (id) => {
     try {
-      const response = await fetch(`${API_URL}/${id}`, {
+      const response = await fetch(`${API_URLS.RECIPES.DELETE(id)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -138,165 +199,190 @@ export default function CreateRecipeScreen() {
     setRecipeId(null);
   };
 
-  // Función para subir imagen al servidor
-  const uploadImage = async (imageUri) => {
-    try {
-      // Por ahora, usamos la URL directa de la imagen
-      // En un entorno de producción, deberías subir la imagen a un servicio como Cloudinary
-      return imageUri;
-    } catch (error) {
-      console.error('Error uploading image:', error);
-      throw error;
-    }
-  };
-
-  // Función para convertir imagen a base64 (TEMPORALMENTE DESHABILITADA)
-  /*
+  // Función para convertir imagen local a base64
   const convertImageToBase64 = async (imageUri) => {
     try {
       const base64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      
       // Determinar el tipo MIME basado en la extensión del archivo
       const extension = imageUri.split('.').pop().toLowerCase();
       let mimeType = 'image/jpeg'; // default
-      
-      if (extension === 'png') {
-        mimeType = 'image/png';
-      } else if (extension === 'gif') {
-        mimeType = 'image/gif';
-      } else if (extension === 'webp') {
-        mimeType = 'image/webp';
-      }
-      
+      if (extension === 'png') mimeType = 'image/png';
+      else if (extension === 'gif') mimeType = 'image/gif';
+      else if (extension === 'webp') mimeType = 'image/webp';
       return `data:${mimeType};base64,${base64}`;
     } catch (error) {
       console.error('Error converting image to base64:', error);
       return null;
     }
   };
-  */
 
   // Función para crear la receta en el backend
   const createRecipe = async (recipeData) => {
     try {
-      // Extraer instrucciones e ingredientes del recipeData
-      const { instructions, ingredients, ...recipeDataWithoutExtras } = recipeData;
-      
-      const response = await fetch(`${API_URL}/${userId}`, {
+      const media = recipeData.recipeImage || null;
+      const instructions = (recipeData.instructions || []).map((inst) => ({
+        description: inst.text || inst.description || '',
+        image: inst.media || null,
+      }));
+      const payload = {
+        title: recipeData.title,
+        description: recipeData.description,
+        estimatedTime: recipeData.estimatedTime,
+        servings: recipeData.servings,
+        media,
+        ingredients: recipeData.ingredients,
+        instructions,
+      };
+      console.log('Payload enviado al backend:', payload);
+      const url = API_URLS.RECIPES.CREATE(recipeData.userId);
+      const result = await makeApiRequest(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(recipeDataWithoutExtras),
+        body: JSON.stringify(payload),
       });
-      
-      if (!response.ok) {
-        // fallback local
-        const localRecipe = {
-          ...recipeDataWithoutExtras,
-          id: Date.now().toString(),
-          createdAt: new Date().toISOString(),
-          status: 'draft'
-        };
-        try {
-          const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
-          const recipes = existingRecipes ? JSON.parse(existingRecipes) : [];
-          recipes.push(localRecipe);
-          await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(recipes));
-        } catch (storageError) {
-          console.log('Error saving recipe locally:', storageError);
-        }
-        return localRecipe;
-      }
-      
-      const result = await response.json();
-      
-      // Si la receta se creó exitosamente, crear ingredientes e instrucciones
-      if (result.success && result.data) {
-        // Crear ingredientes si existen
-        if (ingredients && ingredients.length > 0) {
-          try {
-            const ingredientsResponse = await fetch(`${API_URL.replace('/recipes', '/ingredients')}/${result.data.id}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ ingredients }),
-            });
-            
-            if (ingredientsResponse.ok) {
-              const ingredientsResult = await ingredientsResponse.json();
-              console.log('Ingredients created successfully:', ingredientsResult);
-            } else {
-              console.error('Error creating ingredients:', await ingredientsResponse.text());
+      console.log('Respuesta del backend:', result);
+      if (result.success) {
+        Alert.alert(
+          "¡Éxito!",
+          "Tu receta ha sido creada y publicada correctamente.",
+          [
+            {
+              text: "Ver mi receta",
+              onPress: () => {
+                router.push('/recipecreated');
+              }
+            },
+            {
+              text: "Crear otra",
+              onPress: async () => {
+                // Limpiar formulario solo si NO hay borrador guardado
+                const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
+                if (!draftData) {
+                  setTitle('');
+                  setDescription('');
+                  setPrepTime('');
+                  setCookTime('');
+                  setIngredients([]);
+                  setSteps([{ key: '1', text: '', media: null }]);
+                  setRecipeImage(null);
+                  setNewIngredient('');
+                  setNewAmount('');
+                  setNewUnit('');
+                  setIsEditingExisting(false);
+                  setRecipeId(null);
+                }
+                clearDraft();
+              }
             }
-          } catch (ingredientsError) {
-            console.error('Error creating ingredients:', ingredientsError);
-          }
-        }
-        
-        // Crear instrucciones si existen
-        if (instructions && instructions.length > 0) {
-          try {
-            const instructionsResponse = await fetch(`${API_URL.replace('/recipes', '/instructions')}/${result.data.id}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ instructions }),
-            });
-            
-            if (instructionsResponse.ok) {
-              const instructionsResult = await instructionsResponse.json();
-              console.log('Instructions created successfully:', instructionsResult);
-            } else {
-              console.error('Error creating instructions:', await instructionsResponse.text());
-            }
-          } catch (instructionsError) {
-            console.error('Error creating instructions:', instructionsError);
-          }
-        }
+          ]
+        );
+        // Limpiar campos SIEMPRE después de publicar
+        setTitle('');
+        setDescription('');
+        setPrepTime('');
+        setCookTime('');
+        setIngredients([]);
+        setSteps([{ key: '1', text: '', media: null }]);
+        setRecipeImage(null);
+        setNewIngredient('');
+        setNewAmount('');
+        setNewUnit('');
+        setIsEditingExisting(false);
+        setRecipeId(null);
+        clearDraft();
+      } else {
+        const errorMsg = result.data?.error || 'No se pudo crear la receta. Intenta nuevamente.';
+        Alert.alert('Error', errorMsg);
       }
-      
       return result;
     } catch (error) {
       console.error('Error creating recipe:', error);
-      // fallback local
-      const localRecipe = {
-        ...recipeData,
-        id: Date.now().toString(),
-        createdAt: new Date().toISOString(),
-        status: 'draft'
-      };
-      try {
-        const existingRecipes = await AsyncStorage.getItem('@gloo:localRecipes');
-        const recipes = existingRecipes ? JSON.parse(existingRecipes) : [];
-        recipes.push(localRecipe);
-        await AsyncStorage.setItem('@gloo:localRecipes', JSON.stringify(recipes));
-      } catch (storageError) {
-        console.log('Error saving recipe locally:', storageError);
-      }
-      return localRecipe;
+      Alert.alert('Error', 'No se pudo crear la receta. Intenta nuevamente.');
+      throw error;
     }
   };
 
-  const pickMedia = async (index = null) => {
+  const MAX_FILE_SIZE_MB = 30;
+
+  const pickMediaType = async (type, index = null) => {
+    let mediaTypes = ImagePicker.MediaTypeOptions.All;
+    if (type === 'image') mediaTypes = ImagePicker.MediaTypeOptions.Images;
+    if (type === 'video') mediaTypes = ImagePicker.MediaTypeOptions.Videos;
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      mediaTypes,
       allowsEditing: true,
       aspect: [4, 3],
       quality: 1,
     });
     if (!result.canceled && result.assets?.length > 0) {
-      const uri = result.assets[0].uri;
-      if (index === null) {
-        setRecipeImage(uri);
+      let uri = result.assets[0].uri;
+      // Verifica si el archivo existe
+      const fileInfo = await FileSystem.getInfoAsync(uri);
+      if (!fileInfo.exists) {
+        Alert.alert('Error', 'El archivo seleccionado ya no está disponible. Por favor, selecciona otro.');
+        return;
+      }
+      // Limita el tamaño del archivo a 30MB
+      if (fileInfo.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
+        Alert.alert('Error', 'El archivo es demasiado grande. Selecciona uno menor a 30MB.');
+        return;
+      }
+      // Detecta si es imagen o video
+      const extension = uri.split('.').pop().toLowerCase();
+      const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension);
+      const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(extension);
+      let base64 = null;
+      if (isImage) {
+        // Comprime y redimensiona la imagen antes de convertir a base64
+        try {
+          const manipulated = await ImageManipulator.manipulateAsync(
+            uri,
+            [{ resize: { width: 720 } }],
+            { compress: 0.2, format: ImageManipulator.SaveFormat.JPEG }
+          );
+          uri = manipulated.uri;
+        } catch (e) {
+          console.error('Error al comprimir la imagen:', e);
+          Alert.alert('Error', 'No se pudo comprimir la imagen. Intenta con otra.');
+          return;
+        }
+        base64 = await convertImageToBase64(uri); // ya incluye el mime-type correcto
+      } else if (isVideo) {
+        try {
+          const videoBase64 = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+          });
+          let mimeType = 'video/mp4';
+          if (extension === 'mov') mimeType = 'video/quicktime';
+          else if (extension === 'webm') mimeType = 'video/webm';
+          else if (extension === 'avi') mimeType = 'video/x-msvideo';
+          else if (extension === 'mkv') mimeType = 'video/x-matroska';
+          base64 = `data:${mimeType};base64,${videoBase64}`;
+        } catch (e) {
+          console.error('Error al procesar el video:', e);
+          Alert.alert('Error', 'No se pudo procesar el video. Intenta nuevamente.');
+          return;
+        }
       } else {
+        Alert.alert('Error', 'Solo se permiten imágenes o videos.');
+        return;
+      }
+      if (!base64) {
+        Alert.alert('Error', 'No se pudo procesar el archivo. Intenta nuevamente.');
+        return;
+      }
+      if (index === null) {
+        setRecipeImage(base64);
+      } else {
+        // Solo permitir imágenes en los pasos
+        if (!isImage) {
+          Alert.alert('Error', 'Solo se permiten imágenes en los pasos.');
+          return;
+        }
         const updatedSteps = [...steps];
         if (updatedSteps[index]) {
-          updatedSteps[index].media = uri;
+          updatedSteps[index].media = base64;
           setSteps(updatedSteps);
         }
       }
@@ -342,10 +428,20 @@ export default function CreateRecipeScreen() {
           }}
         />
         {item.media && (
-          <Image source={{ uri: item.media }} style={styles.stepImage} />
+          item.media.startsWith('data:video') ? (
+            <Video
+              source={{ uri: item.media }}
+              style={styles.stepImage}
+              useNativeControls
+              resizeMode="contain"
+              isLooping
+            />
+          ) : (
+            <Image source={{ uri: item.media }} style={styles.stepImage} />
+          )
         )}
         <View style={styles.stepButtons}>
-          <TouchableOpacity onPress={() => pickMedia(index)}>
+          <TouchableOpacity onPress={() => pickMediaType('image', index)}>
             <Ionicons name="image-outline" size={24} color="#f97316" />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => removeStep(item.key)}>
@@ -405,28 +501,22 @@ export default function CreateRecipeScreen() {
     setIsPublishing(true);
 
     try {
-      // Preparar datos de la receta (sin manejo de imágenes por ahora)
       const recipeData = {
         title: title.trim(),
         description: description.trim(),
         estimatedTime: parseInt(prepTime) + parseInt(cookTime) || 30,
-        servings: 4, // Valor por defecto
+        servings: parseInt(cookTime) || 4, // ahora cookTime es servings
         ingredients: ingredients,
-        instructions: validSteps.map((step, index) => ({
-          step: index + 1, // Número del paso
-          description: step.text.trim(),
+        instructions: steps.map((step, index) => ({
+          text: step.text,
+          media: step.media,
         })),
-        userId: userId,
+        recipeImage,
+        userId,
         createdBy: userId,
-        updatedBy: userId
+        updatedBy: userId,
       };
-
-      console.log('Creating recipe with data:', recipeData);
-
-      // Crear la receta en el backend
       const result = await createRecipe(recipeData);
-
-      console.log('Recipe created successfully:', result);
 
       // Mostrar mensaje de éxito y navegar
       Alert.alert(
@@ -441,20 +531,42 @@ export default function CreateRecipeScreen() {
           },
           {
             text: "Crear otra",
-            onPress: () => {
-              // Limpiar formulario
-              setTitle('');
-              setDescription('');
-              setPrepTime('');
-              setCookTime('');
-              setIngredients([]);
-              setSteps([{ key: '1', text: '', media: null }]);
-              setRecipeImage(null);
+            onPress: async () => {
+              // Limpiar formulario solo si NO hay borrador guardado
+              const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
+              if (!draftData) {
+                setTitle('');
+                setDescription('');
+                setPrepTime('');
+                setCookTime('');
+                setIngredients([]);
+                setSteps([{ key: '1', text: '', media: null }]);
+                setRecipeImage(null);
+                setNewIngredient('');
+                setNewAmount('');
+                setNewUnit('');
+                setIsEditingExisting(false);
+                setRecipeId(null);
+              }
               clearDraft();
             }
           }
         ]
       );
+      // Limpiar campos SIEMPRE después de publicar
+      setTitle('');
+      setDescription('');
+      setPrepTime('');
+      setCookTime('');
+      setIngredients([]);
+      setSteps([{ key: '1', text: '', media: null }]);
+      setRecipeImage(null);
+      setNewIngredient('');
+      setNewAmount('');
+      setNewUnit('');
+      setIsEditingExisting(false);
+      setRecipeId(null);
+      clearDraft();
 
     } catch (error) {
       console.error('Error publishing recipe:', error);
@@ -600,22 +712,44 @@ export default function CreateRecipeScreen() {
                 disabled={isPublishing}
               >
                 <Text style={[styles.headerBtnText, styles.deleteBtnText]}>
-                  {isEditingExisting ? 'Delete' : 'Clear'}
+                  Delete
                 </Text>
               </TouchableOpacity>
             </View>
 
             {/* Recipe Image */}
-            <TouchableOpacity style={styles.imagePicker} onPress={() => pickMedia(null)}>
-              {recipeImage ? (
-                <Image source={{ uri: recipeImage }} style={styles.recipeImage} />
-              ) : (
-                <View style={styles.imagePlaceholder}>
-                  <Ionicons name="camera-outline" size={48} color="#f97316" />
-                  <Text style={styles.uploadText}>Upload a photo of your recipe</Text>
-                </View>
-              )}
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 8 }}>
+              <TouchableOpacity style={[styles.imagePicker, { flex: 1 }]} onPress={() => pickMediaType('image', null)}>
+                <Ionicons name="image-outline" size={32} color="#f97316" />
+                <Text style={styles.uploadText}>Subir foto</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.imagePicker, { flex: 1 }]} onPress={() => Alert.alert('Funcionalidad en desarrollo', 'Por ahora, solo puedes subir imágenes. Pronto podrás subir videos.') }>
+                <Ionicons name="videocam-outline" size={32} color="#1e40af" />
+                <Text style={styles.uploadText}>Subir video</Text>
+              </TouchableOpacity>
+            </View>
+
+            {recipeImage && (
+              <View style={{ alignItems: 'center', marginVertical: 16 }}>
+                {recipeImage.startsWith('data:video') ? (
+                  <Video
+                    source={{ uri: recipeImage }}
+                    style={{ width: 200, height: 200, borderRadius: 16 }}
+                    useNativeControls
+                    resizeMode="contain"
+                    isLooping
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: recipeImage }}
+                    style={{ width: 200, height: 200, borderRadius: 16, resizeMode: 'cover' }}
+                  />
+                )}
+                <Text style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
+                  {recipeImage.startsWith('data:video') ? 'Vista previa de video' : 'Vista previa de la imagen'}
+                </Text>
+              </View>
+            )}
 
             {/* Recipe Details */}
             <TextInput
@@ -644,7 +778,7 @@ export default function CreateRecipeScreen() {
               />
               <TextInput
                 style={styles.timeInput}
-                placeholder="Cook Time (min)"
+                placeholder="Servings"
                 placeholderTextColor="#9ca3af"
                 value={cookTime}
                 onChangeText={setCookTime}
@@ -743,13 +877,13 @@ export default function CreateRecipeScreen() {
             <View style={styles.modalHeader}>
               <Ionicons name="warning" size={32} color="#dc2626" />
               <Text style={styles.modalTitle}>
-                {isEditingExisting ? 'Delete Recipe' : 'Clear Form'}
+                Delete Recipe
               </Text>
             </View>
             <Text style={styles.modalMessage}>
               {isEditingExisting 
                 ? 'Are you sure you want to delete this recipe? This action cannot be undone and will remove it from the server.'
-                : 'Are you sure you want to clear the form? This will delete all your current work and drafts.'
+                : 'Are you sure you want to delete the form? This will delete all your current work and drafts.'
               }
             </Text>
             <View style={styles.modalButtons}>
@@ -758,7 +892,7 @@ export default function CreateRecipeScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.confirmDeleteButton} onPress={confirmDelete}>
                 <Text style={styles.confirmDeleteButtonText}>
-                  {isEditingExisting ? 'Delete' : 'Clear'}
+                  Delete
                 </Text>
               </TouchableOpacity>
             </View>

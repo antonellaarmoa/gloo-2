@@ -19,6 +19,8 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
+import SaveRecipeModal from '../../components/SaveRecipeModal';
+import LikeButton from '../../components/LikeButton';
 
 const { width } = Dimensions.get('window');
 const API_URL = 'https://gloo-api-production.up.railway.app/api/v1';
@@ -62,6 +64,9 @@ export default function SearchScreen() {
   const [categories, setCategories] = useState([]);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [creatingCollection, setCreatingCollection] = useState(false);
+  const [savedRecipes, setSavedRecipes] = useState({});
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
 
   useEffect(() => {
     fetchSuggestions();
@@ -70,6 +75,14 @@ export default function SearchScreen() {
     if (isSignedIn && userId) {
       fetchUserCollections();
     }
+    const loadSaved = async () => {
+      const localSaved = await AsyncStorage.getItem('@gloo:savedRecipes');
+      setSavedRecipes(localSaved ? JSON.parse(localSaved) : {});
+    };
+    loadSaved();
+    // Escuchar cambios globales
+    global.refreshProfileFavorites = loadSaved;
+    return () => { global.refreshProfileFavorites = undefined; };
   }, [isSignedIn, userId]);
 
   const fetchCategories = async () => {
@@ -134,6 +147,27 @@ export default function SearchScreen() {
         filteredResults = filteredResults.filter(recipe => 
           !recipe.title.toLowerCase().includes('modificada')
         );
+        
+        // Filtrar por ingredientes excluidos en el frontend
+        if (excludedIngredients.length > 0) {
+          filteredResults = filteredResults.filter(recipe => {
+            // Normalizar ingredientes a array de strings
+            let recipeIngredients = [];
+            if (Array.isArray(recipe.ingredients)) {
+              if (typeof recipe.ingredients[0] === 'object' && recipe.ingredients[0]?.name) {
+                recipeIngredients = recipe.ingredients.map(ing => ing.name.toLowerCase());
+              } else {
+                recipeIngredients = recipe.ingredients.map(ing => ing.toLowerCase());
+              }
+            } else if (typeof recipe.ingredients === 'string') {
+              recipeIngredients = recipe.ingredients.split(',').map(ing => ing.trim().toLowerCase());
+            }
+            // Si no hay ingredientes, no excluir
+            if (!recipeIngredients.length) return true;
+            // Si alguno de los ingredientes excluidos está presente, excluir la receta
+            return !excludedIngredients.some(exIng => recipeIngredients.includes(exIng.toLowerCase()));
+          });
+        }
         
         // Remover duplicados basados en título similar
         const uniqueRecipes = [];
@@ -443,6 +477,22 @@ export default function SearchScreen() {
     }
   };
 
+  const handleSaveToggle = async (recipeId, isSaved) => {
+    const newSaved = { ...savedRecipes, [recipeId]: isSaved };
+    setSavedRecipes(newSaved);
+    await AsyncStorage.setItem('@gloo:savedRecipes', JSON.stringify(newSaved));
+    // Sincronizar con backend
+    if (userId) {
+      try {
+        // Aquí deberías llamar a tu función de backend para guardar/desguardar
+        // await saveRecipeToFavoritesBackend(recipeId, isSaved);
+        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+      } catch (error) {
+        console.log('Error syncing with backend:', error);
+      }
+    }
+  };
+
   const renderRecipe = ({ item }) => {
     const getUserDisplayName = () => {
       if (item.user && typeof item.user === 'object') {
@@ -516,6 +566,7 @@ export default function SearchScreen() {
     };
 
     const { likes, liked } = likesState[item.id] || { likes: item.stats?.likes || 0, liked: false };
+    const isSaved = item ? savedRecipes[item.id] || false : false;
     
     return (
       <TouchableOpacity style={styles.recipeCard} onPress={() => router.push({ pathname: '/(tabs)/recipe', params: { id: item.id } })}>
@@ -533,14 +584,14 @@ export default function SearchScreen() {
             <Text style={styles.profileUser}>@{getUserDisplayName()}</Text>
             <Text style={styles.profileTime}>{new Date(item.createdAt).toLocaleDateString()}</Text>
           </View>
-          <TouchableOpacity 
-            style={styles.saveButton}
-            onPress={() => {
-              setSelectedRecipe(item);
-              setCollectionModalVisible(true);
-            }}
+          <TouchableOpacity
+            style={[styles.saveButton, isGuest && { opacity: 0.5 }]}
+            onPress={() => { if (!isGuest) handleSave(item.id); }}
+            disabled={isGuest}
           >
-            <Ionicons name="bookmark-outline" size={20} color="#fff" />
+            <View style={[styles.iconContainer, isSaved && styles.iconContainerSaved]}>
+              <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={24} color="white" style={styles.icon} />
+            </View>
           </TouchableOpacity>
         </View>
         <View style={styles.recipeInfo}>
@@ -560,8 +611,15 @@ export default function SearchScreen() {
               <Text style={styles.recipeMetaText}>{getAverageRating()}</Text>
             </View>
             <View style={styles.metaItem}>
-              <Ionicons name="heart-outline" size={14} color="#666" />
-              <Text style={styles.recipeMetaText}>{likes}</Text>
+              <LikeButton
+                recipeId={item.id}
+                userId={userId}
+                initialLiked={!!likesState?.[item.id]}
+                initialCount={item.likes || 0}
+                size={14}
+                showCount={false}
+                style={{ marginRight: 2 }}
+              />
             </View>
             <View style={styles.metaItem}>
               <Ionicons name="chatbubble-outline" size={14} color="#666" />
@@ -572,6 +630,8 @@ export default function SearchScreen() {
       </TouchableOpacity>
     );
   };
+
+  const isSaved = selectedRecipe ? savedRecipes[selectedRecipe.id] || false : false;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -745,6 +805,22 @@ export default function SearchScreen() {
               ))}
             </View>
             
+            {(excludedIngredients.length > 0 || duration !== 60 || selectedCategory !== '' || sortBy !== 'newest') && (
+              <TouchableOpacity
+                style={[styles.applyBtn, { backgroundColor: '#ccc', marginBottom: 10 }]}
+                onPress={() => {
+                  setExcludedIngredients([]);
+                  setDuration(60);
+                  setSelectedCategory('');
+                  setSortBy('newest');
+                  setIngredientInput('');
+                  setFilterVisible(false);
+                }}
+              >
+                <Text style={[styles.applyBtnText, { color: '#333' }]}>Limpiar filtros</Text>
+              </TouchableOpacity>
+            )}
+            
             <TouchableOpacity style={styles.applyBtn} onPress={() => setFilterVisible(false)}>
               <Text style={styles.applyBtnText}>Aplicar filtros</Text>
             </TouchableOpacity>
@@ -779,10 +855,10 @@ export default function SearchScreen() {
               <Text style={styles.modalLabel}>⭐ Guardar en favoritos:</Text>
               <TouchableOpacity 
                 style={styles.favoriteButton}
-                onPress={() => selectedRecipe && handleSaveToFavorites(selectedRecipe.id)}
+                onPress={() => selectedRecipe && handleSaveToggle(selectedRecipe.id, !isSaved)}
               >
-                <Ionicons name="heart" size={20} color="#E2773C" />
-                <Text style={styles.favoriteButtonText}>Agregar a favoritos</Text>
+                <Ionicons name="heart" size={20} color={isSaved ? '#fbbf24' : '#E2773C'} />
+                <Text style={styles.favoriteButtonText}>{isSaved ? 'Quitar de favoritos' : 'Agregar a favoritos'}</Text>
               </TouchableOpacity>
               
               <Text style={styles.modalLabel}>📁 Guardar en colección:</Text>
@@ -848,6 +924,17 @@ export default function SearchScreen() {
           </View>
         </View>
       </Modal>
+
+      <SaveRecipeModal
+        visible={showSaveModal}
+        onClose={() => setShowSaveModal(false)}
+        recipe={selectedRecipe}
+        userId={userId}
+        onSaved={(recipeId, isSaved) => {
+          setShowSaveModal(false);
+          if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1256,6 +1343,35 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  iconContainer: {
+    width: 44,
+    height: 44,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  iconContainerSaved: {
+    backgroundColor: '#fbbf24',
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 8,
+    borderColor: '#ffffff',
+  },
+  icon: {
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
   },
   selectedRecipeInfo: {
     alignItems: 'center',

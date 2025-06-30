@@ -73,33 +73,12 @@ export default function FinishScreen() {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.favButton} onPress={() => setFavModalVisible(true)}>
-        <Text style={styles.favText}>Add To Favorites</Text>
-      </TouchableOpacity>
-
       <TouchableOpacity
         style={styles.recipesButton}
         onPress={() => router.push('/home')}
       >
         <Text style={styles.recipesText}>See More Recipes</Text>
       </TouchableOpacity>
-
-      <Modal
-        visible={favModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setFavModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Ionicons name="star" size={60} color="#FFD700" style={{ marginBottom: 16 }} />
-            <Text style={styles.modalTitle}>¡Receta añadida a favoritos!</Text>
-            <TouchableOpacity style={styles.modalButton} onPress={() => setFavModalVisible(false)}>
-              <Text style={styles.modalButtonText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -141,18 +120,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 24,
   },
-  favButton: {
-    backgroundColor: '#1B3DE2',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 20,
-    marginBottom: 16,
-  },
-  favText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
   recipesButton: {
     backgroundColor: '#F9690E',
     paddingVertical: 12,
@@ -163,41 +130,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: 'bold',
     fontSize: 14,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: 32,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#F9690E',
-    marginBottom: 18,
-    textAlign: 'center',
-  },
-  modalButton: {
-    backgroundColor: '#F9690E',
-    borderRadius: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 32,
-    marginTop: 10,
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
   },
 });

@@ -118,6 +118,43 @@ export const clearFavorites = async (userId) => {
   }
 };
 
+// Función para forzar sincronización de favoritos
+export const forceSyncFavorites = async (userId) => {
+  try {
+    const favorites = await getFavorites(userId);
+    console.log('Force sync favorites:', favorites.length, 'recipes');
+    
+    // Refrescar perfil si existe la función global
+    if (global.refreshProfileFavorites) {
+      global.refreshProfileFavorites();
+    }
+    
+    return favorites;
+  } catch (error) {
+    console.error('Error force syncing favorites:', error);
+    return [];
+  }
+};
+
+// Función para verificar y reparar inconsistencias en favoritos
+export const repairFavorites = async (userId) => {
+  try {
+    const favorites = await getFavorites(userId);
+    const validFavorites = favorites.filter(fav => fav && fav.id);
+    
+    if (validFavorites.length !== favorites.length) {
+      // Hay favoritos inválidos, limpiarlos
+      await AsyncStorage.setItem(getFavoritesKey(userId), JSON.stringify(validFavorites));
+      console.log('Repaired favorites:', validFavorites.length, 'valid recipes');
+    }
+    
+    return validFavorites;
+  } catch (error) {
+    console.error('Error repairing favorites:', error);
+    return [];
+  }
+};
+
 // --- COLECCIONES PERSONALIZADAS (SOLO FRONTEND) ---
 
 const getCollectionsKey = (userId) => `@gloo:collections:${userId}`;

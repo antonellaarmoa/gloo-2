@@ -22,11 +22,46 @@ import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import RecipeCard from '../components/RecipeCard';
 import MenuModal from '../components/MenuModal';
 import ShareProfileModal from '../components/ShareProfileModal';
-import { API_URLS, apiRequest } from '../config/api';
+import { API_URLS } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCustomCollections, getRecipesFromCustomCollection, deleteCustomCollection } from '../utils/favoritesManager';
 
 const { width } = Dimensions.get('window');
+
+// Función robusta para hacer peticiones a la API
+const makeApiRequest = async (url, options = {}) => {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      ...options,
+    });
+    
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      console.error('Error parsing JSON response:', parseError);
+      data = null;
+    }
+    
+    return {
+      success: response.ok,
+      status: response.status,
+      data,
+      response,
+    };
+  } catch (error) {
+    console.error(`API request failed for ${url}:`, error);
+    return {
+      success: false,
+      error,
+      status: 0,
+    };
+  }
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -50,9 +85,25 @@ export default function ProfileScreen() {
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newCollectionIcon, setNewCollectionIcon] = useState('folder');
+  const [changedRecipes, setChangedRecipes] = useState([]);
 
   // Helpers para colecciones custom locales
   const getCollectionsKey = (userId) => `@gloo:collections:${userId}`;
+
+  // Cargar recetas modificadas
+  const loadChangedRecipes = async () => {
+    if (!userId) return;
+    try {
+      const storageKey = `changed_recipes_${userId}`;
+      const existingChanged = await AsyncStorage.getItem(storageKey);
+      const changedRecipesList = existingChanged ? JSON.parse(existingChanged) : [];
+      setChangedRecipes(changedRecipesList);
+      console.log('Loaded changed recipes:', changedRecipesList.length);
+    } catch (error) {
+      console.error('Error loading changed recipes:', error);
+      setChangedRecipes([]);
+    }
+  };
 
   const fetchProfileData = async () => {
     if (!isSignedIn || !userId) return;
@@ -61,7 +112,7 @@ export default function ProfileScreen() {
     let debugInfo = { userId, url: API_URLS.USERS.BY_ID(userId), response: null, error: null };
     try {
       // 1. Get user profile from backend
-      const userRes = await apiRequest(API_URLS.USERS.BY_ID(userId));
+      const userRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId));
       debugInfo.response = userRes;
       if (userRes.success && userRes.data && userRes.data.data) {
         backendUser = userRes.data.data;
@@ -72,7 +123,7 @@ export default function ProfileScreen() {
       }
       // 2. If user does not exist in backend, create it using Clerk data
       if (!backendUser && user) {
-        const createRes = await apiRequest(API_URLS.USERS.BY_ID(userId), {
+        const createRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId), {
           method: 'PUT',
           body: JSON.stringify({
             firstName: user.firstName || '',
@@ -84,7 +135,7 @@ export default function ProfileScreen() {
         });
         debugInfo.createRes = createRes;
         // Re-fetch after creation
-        const userRes2 = await apiRequest(API_URLS.USERS.BY_ID(userId));
+        const userRes2 = await makeApiRequest(API_URLS.USERS.BY_ID(userId));
         debugInfo.response2 = userRes2;
         if (userRes2.success && userRes2.data && userRes2.data.data) {
           backendUser = userRes2.data.data;
@@ -96,11 +147,11 @@ export default function ProfileScreen() {
       }
       setFetchDebug(debugInfo);
       // 3. Get stats
-      const statsRes = await apiRequest(API_URLS.USERS.STATS(userId));
+      const statsRes = await makeApiRequest(API_URLS.USERS.STATS(userId));
       // 4. Get user recipes
-      const recipesRes = await apiRequest(API_URLS.RECIPES.BY_USER(userId));
+      const recipesRes = await makeApiRequest(API_URLS.RECIPES.BY_USER(userId));
       // 5. Get all collections (backend, metadatos)
-      const collectionsRes = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+      const collectionsRes = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
       console.log('DEBUG collectionsRes:', collectionsRes);
       let backendCollections = [];
       let favoritos = [];
@@ -111,7 +162,7 @@ export default function ProfileScreen() {
           backendCollections.map(async (col) => {
             const colUrl = `${API_URLS.COLLECTIONS.BY_USER(userId)}/${col.id}`;
             console.log('DEBUG fetching collection recipes:', colUrl);
-            const colRes = await apiRequest(colUrl);
+            const colRes = await makeApiRequest(colUrl);
             console.log('DEBUG colRes:', colRes);
             let recipes = [];
             if (
@@ -131,10 +182,25 @@ export default function ProfileScreen() {
         favoritos = favCol && favCol.recipes ? favCol.recipes : [];
         console.log('DEBUG backendCollections:', backendCollections);
         console.log('DEBUG favoritos:', favoritos);
+        
+        // También cargar favoritos locales como respaldo
+        try {
+          const { getFavorites } = require('../utils/favoritesManager');
+          const localFavorites = await getFavorites(userId);
+          console.log('DEBUG localFavorites:', localFavorites);
+          
+          // Si no hay favoritos en backend pero sí en local, usar los locales
+          if (favoritos.length === 0 && localFavorites.length > 0) {
+            favoritos = localFavorites;
+            console.log('Using local favorites as fallback');
+          }
+        } catch (error) {
+          console.error('Error loading local favorites:', error);
+        }
       }
       // 6. Followers/Following
-      const followersRes = await apiRequest(API_URLS.FOLLOWS.FOLLOWERS(userId));
-      const followingRes = await apiRequest(API_URLS.FOLLOWS.FOLLOWING(userId));
+      const followersRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWERS(userId));
+      const followingRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWING(userId));
       // 7. Custom collections (local)
       const customCollections = await getCustomCollections(userId);
       setUserData(backendUser);
@@ -175,15 +241,34 @@ export default function ProfileScreen() {
   // Fetch user data from backend y colecciones locales
   useEffect(() => {
     fetchProfileData();
+    loadChangedRecipes();
 
     // Listener global para refrescar favoritos/colecciones desde otras pantallas
-    global.refreshProfileFavorites = fetchProfileData;
+    global.refreshProfileFavorites = () => {
+      console.log('Refreshing profile favorites...');
+      fetchProfileData();
+      loadChangedRecipes();
+    };
+
+    // Cleanup function
+    return () => {
+      if (global.refreshProfileFavorites) {
+        delete global.refreshProfileFavorites;
+      }
+    };
+    
+    // Listener global para refrescar recetas modificadas
+    global.refreshChangedRecipes = loadChangedRecipes;
     // Listener de AppState para refrescar al volver al perfil
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') fetchProfileData();
+      if (state === 'active') {
+        fetchProfileData();
+        loadChangedRecipes();
+      }
     });
     return () => {
       global.refreshProfileFavorites = undefined;
+      global.refreshChangedRecipes = undefined;
       subscription.remove();
     };
   }, [isSignedIn, userId]);
@@ -236,7 +321,7 @@ export default function ProfileScreen() {
 
   // Sincroniza colecciones backend→local
   const syncBackendCollectionsToLocal = async () => {
-    const res = await apiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
+    const res = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
     if (res.success && Array.isArray(res.data?.data)) {
       const backendCollections = res.data.data;
       let localCollections = await getCustomCollections(userId);
@@ -275,7 +360,7 @@ export default function ProfileScreen() {
                 return;
               }
               console.log('Intentando borrar colección:', collectionId, 'con token:', token);
-              const res = await apiRequest(API_URLS.COLLECTIONS.DELETE(userId, collectionId), {
+              const res = await makeApiRequest(API_URLS.COLLECTIONS.DELETE(userId, collectionId), {
                 method: 'DELETE',
                 headers: {
                   'Content-Type': 'application/json',
@@ -323,7 +408,7 @@ export default function ProfileScreen() {
         description: '',
         isPublic: 'false',
       };
-      const res = await apiRequest(API_URLS.COLLECTIONS.CREATE(userId), {
+      const res = await makeApiRequest(API_URLS.COLLECTIONS.CREATE(userId), {
         method: 'POST',
         body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
@@ -488,10 +573,9 @@ export default function ProfileScreen() {
                 <View style={styles.recipeCard}>
                   <RecipeCard
                     recipe={{
-                      id: item.id,
+                      ...item,
                       title: item.title || 'Sin título',
                       description: item.description || 'Sin descripción',
-                      image: item.imageUrl ? { uri: item.imageUrl } : require('../assets/hamburguesa.png'),
                       averageRating: item.averageRating || item.rating || 4.2,
                       estimatedTime: item.estimatedTime || item.duration || 30,
                     }}
@@ -528,11 +612,42 @@ export default function ProfileScreen() {
               {/* Render colecciones personalizadas (solo local) */}
               {renderCustomCollections()}
             </ScrollView>
+          ) : activeTab === 'Changed' ? (
+            <FlatList
+              data={changedRecipes}
+              keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
+              numColumns={2}
+              renderItem={({ item }) => (
+                <View style={styles.recipeCard}>
+                  <RecipeCard
+                    recipe={{
+                      ...item,
+                      title: item.title || 'Sin título',
+                      description: item.description || 'Sin descripción',
+                      averageRating: item.averageRating || item.rating || 4.2,
+                      estimatedTime: item.estimatedTime || item.duration || 30,
+                    }}
+                    onPress={() => router.push({
+                      pathname: '/(tabs)/recipe',
+                      params: { post: JSON.stringify(item) }
+                    })}
+                  />
+                </View>
+              )}
+              contentContainerStyle={styles.recipesGrid}
+              showsVerticalScrollIndicator={false}
+              ListEmptyComponent={
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>Aún no tienes recetas modificadas</Text>
+                  <Text style={styles.emptyStateSubtext}>Modifica una receta para que aparezca aquí</Text>
+                </View>
+              }
+            />
           ) : (
-            // Para la tab Changed y otras, puedes usar un ScrollView si lo necesitas
+            // Para otras tabs, puedes usar un ScrollView si lo necesitas
             <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
               <View style={styles.recipesContainer}>
-                <Text style={styles.emptyStateText}>Las recetas modificadas aparecerán aquí</Text>
+                <Text style={styles.emptyStateText}>Contenido no disponible</Text>
               </View>
             </ScrollView>
           )}

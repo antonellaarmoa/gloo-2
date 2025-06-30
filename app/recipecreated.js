@@ -29,13 +29,12 @@ export default function RecipeCreatedScreen() {
       <View style={styles.confettiContainer}>
         <Image
           source={require('../assets/gloofeliz.png')}
-          style={{ width: 260, height: 260, alignSelf: 'center', marginVertical: 24 }}
+          style={styles.celebrationImage}
           resizeMode="contain"
         />
       </View>
-      <Text style={styles.successText}>Excellent!
-        <Text style={styles.successSubText}> Your Recipe Has Been Created</Text>
-      </Text>
+      <Text style={styles.successText}>Excellent!</Text>
+      <Text style={styles.successSubText}>Your Recipe Has Been Created</Text>
       <Text style={styles.description}>Please wait while we check that everything is okay. We will notify you when there is any news.</Text>
       <TouchableOpacity style={styles.doneBtn} onPress={handleDone}>
         <Text style={styles.doneText}>Done</Text>
@@ -60,22 +59,33 @@ const styles = StyleSheet.create({
   },
   confettiContainer: {
     width: '100%',
-    height: 200,
-    marginBottom: 20,
+    height: 160,
+    marginBottom: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  celebrationImage: {
+    width: 160,
+    height: 160,
+    marginVertical: 0,
   },
   image: {
     width: '100%',
     height: '100%',
   },
   successText: {
-    fontSize: 20,
+    fontSize: 22,
     color: '#f97316',
     fontFamily: 'DynaPuff',
     textAlign: 'center',
+    marginTop: 8,
   },
   successSubText: {
     color: '#f97316',
     fontFamily: 'DynaPuff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 8,
   },
   description: {
     fontSize: 14,
