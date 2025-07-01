@@ -21,6 +21,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Slider from '@react-native-community/slider';
 import SaveRecipeModal from '../../components/SaveRecipeModal';
 import LikeButton from '../../components/LikeButton';
+import { addToFavorites, removeFromFavorites, isRecipeFavorite } from '../../utils/favoritesManager';
+import { API_URLS } from '../../config/api';
 
 const { width } = Dimensions.get('window');
 const API_URL = 'https://gloo-api-production.up.railway.app/api/v1';
@@ -76,14 +78,26 @@ export default function SearchScreen() {
       fetchUserCollections();
     }
     const loadSaved = async () => {
-      const localSaved = await AsyncStorage.getItem('@gloo:savedRecipes');
-      setSavedRecipes(localSaved ? JSON.parse(localSaved) : {});
+      try {
+        const localSaved = await AsyncStorage.getItem('@gloo:savedRecipes');
+        const savedData = localSaved ? JSON.parse(localSaved) : {};
+        console.log('Loaded saved recipes:', Object.keys(savedData).length);
+        setSavedRecipes(savedData);
+      } catch (error) {
+        console.error('Error loading saved recipes:', error);
+        setSavedRecipes({});
+      }
     };
     loadSaved();
     // Escuchar cambios globales
     global.refreshProfileFavorites = loadSaved;
     return () => { global.refreshProfileFavorites = undefined; };
   }, [isSignedIn, userId]);
+
+  // Detectar si el usuario es invitado
+  useEffect(() => {
+    setIsGuest(!isSignedIn);
+  }, [isSignedIn]);
 
   const fetchCategories = async () => {
     try {
@@ -478,18 +492,81 @@ export default function SearchScreen() {
   };
 
   const handleSaveToggle = async (recipeId, isSaved) => {
+    console.log('handleSaveToggle called:', { recipeId, isSaved });
+    
+    // Actualizar estado local inmediatamente
     const newSaved = { ...savedRecipes, [recipeId]: isSaved };
     setSavedRecipes(newSaved);
     await AsyncStorage.setItem('@gloo:savedRecipes', JSON.stringify(newSaved));
-    // Sincronizar con backend
+    
+    // Sincronizar con favoritos locales y backend
     if (userId) {
       try {
-        // Aquí deberías llamar a tu función de backend para guardar/desguardar
-        // await saveRecipeToFavoritesBackend(recipeId, isSaved);
-        if (global.refreshProfileFavorites) global.refreshProfileFavorites();
+        const recipe = results.find(r => r.id === recipeId);
+        
+        if (isSaved && recipe) {
+          // Agregar a favoritos
+          const localAdded = await addToFavorites(userId, recipe);
+          
+          // Agregar al backend
+          const response = await fetch(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipeId: recipeId })
+          });
+          const backendData = await response.json();
+          const backendAdded = backendData.success;
+          
+          console.log('Save toggle - added to favorites:', { localAdded, backendAdded });
+        } else if (!isSaved) {
+          // Remover de favoritos
+          const localRemoved = await removeFromFavorites(userId, recipeId);
+          
+          // Remover del backend
+          const response = await fetch(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ recipeId: recipeId })
+          });
+          const backendData = await response.json();
+          const backendRemoved = backendData.success;
+          
+          console.log('Save toggle - removed from favorites:', { localRemoved, backendRemoved });
+        }
+        
+        // Refrescar favoritos en el perfil
+        if (global.refreshProfileFavorites) {
+          global.refreshProfileFavorites();
+        }
       } catch (error) {
-        console.log('Error syncing with backend:', error);
+        console.error('Error syncing with favorites:', error);
       }
+    }
+  };
+
+  // Función para manejar el botón guardar - abre el modal
+  const handleSave = (recipeId) => {
+    console.log('handleSave called with recipeId:', recipeId);
+    console.log('isSignedIn:', isSignedIn, 'userId:', userId);
+    
+    if (!isSignedIn) {
+      Alert.alert(
+        'Inicia sesión',
+        'Debes iniciar sesión para guardar recetas',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Iniciar sesión', onPress: () => router.push('/(auth)/sign-in') }
+        ]
+      );
+      return;
+    }
+    
+    const recipe = results.find(r => r.id === recipeId);
+    console.log('Found recipe:', recipe ? recipe.title : 'not found');
+    if (recipe) {
+      setSelectedRecipe(recipe);
+      setShowSaveModal(true);
+      console.log('Modal opened for recipe:', recipe.title);
     }
   };
 
@@ -585,9 +662,8 @@ export default function SearchScreen() {
             <Text style={styles.profileTime}>{new Date(item.createdAt).toLocaleDateString()}</Text>
           </View>
           <TouchableOpacity
-            style={[styles.saveButton, isGuest && { opacity: 0.5 }]}
-            onPress={() => { if (!isGuest) handleSave(item.id); }}
-            disabled={isGuest}
+            style={styles.saveButton}
+            onPress={() => handleSave(item.id)}
           >
             <View style={[styles.iconContainer, isSaved && styles.iconContainerSaved]}>
               <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={24} color="white" style={styles.icon} />
@@ -931,6 +1007,11 @@ export default function SearchScreen() {
         recipe={selectedRecipe}
         userId={userId}
         onSaved={(recipeId, isSaved) => {
+          // Actualizar estado local
+          const newSaved = { ...savedRecipes, [recipeId]: isSaved };
+          setSavedRecipes(newSaved);
+          AsyncStorage.setItem('@gloo:savedRecipes', JSON.stringify(newSaved));
+          
           setShowSaveModal(false);
           if (global.refreshProfileFavorites) global.refreshProfileFavorites();
         }}

@@ -3,6 +3,7 @@ import { Text, TextInput, TouchableOpacity, View, StyleSheet, ImageBackground, D
 import { useSignUp, useAuth } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { handleSignUp, checkExistingSession } from '../../utils/clerkErrorHandler';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -44,12 +45,7 @@ export default function SignUpScreen() {
     ]).start();
   }, []);
 
-  // Redirect if already signed in
-  React.useEffect(() => {
-    if (isSignedIn) {
-      router.replace('/(tabs)/home');
-    }
-  }, [isSignedIn, router]);
+  // AuthGuard handles the redirect logic, so we don't need this here
 
   const onSignUpPress = async () => {
     if (!firstName || !lastName || !emailAddress || !password) {
@@ -64,33 +60,21 @@ export default function SignUpScreen() {
 
     if (!isLoaded) return;
 
-    // Check if already signed in
-    if (isSignedIn) {
-      router.replace('/(tabs)/home');
-      return;
+    // AuthGuard handles session checks
+    setLoading(true);
+    
+    const result = await handleSignUp(signUp, setActive, { 
+      firstName, 
+      lastName, 
+      emailAddress, 
+      password 
+    }, router);
+    
+    if (!result.success && !result.redirected) {
+      Alert.alert(result.error.title || 'Error', result.error.message);
     }
-
-    try {
-      setLoading(true);
-      const completeSignUp = await signUp.create({
-        firstName,
-        lastName,
-        emailAddress,
-        password,
-      });
-
-      await setActive({ session: completeSignUp.createdSessionId });
-      router.replace('/(tabs)/home');
-    } catch (err) {
-      console.error(JSON.stringify(err, null, 2));
-      if (err.errors && err.errors[0]) {
-        Alert.alert('Error', err.errors[0].message);
-      } else {
-        Alert.alert('Error', 'An unexpected error occurred');
-      }
-    } finally {
-      setLoading(false);
-    }
+    
+    setLoading(false);
   };
 
   return (

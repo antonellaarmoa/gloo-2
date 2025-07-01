@@ -21,7 +21,9 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.anonymous.gloo",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -29,6 +31,12 @@
     "plugins": [
       "expo-router"
     ],
-    "scheme": "gloo"
+    "scheme": "gloo",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8ef9d409-e96d-4fe7-bf03-63d5168f6cdf"
+      }
+    }
   }
 }

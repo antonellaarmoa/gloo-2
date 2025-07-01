@@ -10,18 +10,10 @@ export default function Index() {
   useEffect(() => {
     const checkOnboarding = async () => {
       try {
-        // For testing: always show onboarding
-        // Comment out the next line to enable normal flow
-        await AsyncStorage.removeItem('hasSeenOnboarding');
-        
-        const seen = await AsyncStorage.getItem('hasSeenOnboarding');
-        if (seen === 'true') {
-          router.replace('/(auth)/sign-in');
-        } else {
-          router.replace('/onboarding');
-        }
+        // Siempre mostrar onboarding primero
+        router.replace('/onboarding');
       } catch (error) {
-        console.error('Error checking onboarding:', error);
+        console.error('Error in onboarding check:', error);
         router.replace('/onboarding'); // fallback
       } finally {
         setLoading(false);

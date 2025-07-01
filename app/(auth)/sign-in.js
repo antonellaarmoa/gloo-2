@@ -3,6 +3,7 @@ import { Text, TextInput, TouchableOpacity, View, StyleSheet, ImageBackground, D
 import { useSignIn, useOAuth, useAuth } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { handleSignIn, handleOAuth, checkExistingSession } from '../../utils/clerkErrorHandler';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -52,12 +53,7 @@ export default function SignInScreen() {
     ]).start();
   }, []);
 
-  // Redirect if already signed in
-  React.useEffect(() => {
-    if (isSignedIn) {
-      router.replace('/(tabs)/home');
-    }
-  }, [isSignedIn, router]);
+  // AuthGuard handles the redirect logic, so we don't need this here
 
   const onSignInPress = async () => {
     if (!emailAddress || !password) {
@@ -67,56 +63,31 @@ export default function SignInScreen() {
 
     if (!isLoaded) return;
 
-    // Check if already signed in
-    if (isSignedIn) {
-      router.replace('/(tabs)/home');
-      return;
+    // AuthGuard handles session checks
+    setLoading(true);
+    
+    const result = await handleSignIn(signIn, setActive, { emailAddress, password }, router);
+    
+    if (!result.success && !result.redirected) {
+      Alert.alert(result.error.title || 'Error', result.error.message);
     }
-
-    try {
-      setLoading(true);
-      const completeSignIn = await signIn.create({
-        identifier: emailAddress,
-        password,
-      });
-
-      await setActive({ session: completeSignIn.createdSessionId });
-      router.replace('/(tabs)/home');
-    } catch (err) {
-      console.error(JSON.stringify(err, null, 2));
-      if (err.errors && err.errors[0]) {
-        Alert.alert('Error', err.errors[0].message);
-      } else {
-        Alert.alert('Error', 'An unexpected error occurred');
-      }
-    } finally {
-      setLoading(false);
-    }
+    
+    setLoading(false);
   };
 
   const onGooglePress = async () => {
     if (!isLoaded) return;
 
-    // Check if already signed in
-    if (isSignedIn) {
-      router.replace('/(tabs)/home');
-      return;
+    // AuthGuard handles session checks
+    setGoogleLoading(true);
+    
+    const result = await handleOAuth(startOAuthFlow, setActive, router);
+    
+    if (!result.success) {
+      Alert.alert(result.error.title || 'Error', result.error.message);
     }
-
-    try {
-      setGoogleLoading(true);
-      const { createdSessionId, setActive } = await startOAuthFlow();
-
-      if (createdSessionId) {
-        await setActive({ session: createdSessionId });
-        router.replace('/(tabs)/home');
-      }
-    } catch (err) {
-      console.error('OAuth error', err);
-      Alert.alert('Error', 'Failed to sign in with Google. Please try again.');
-    } finally {
-      setGoogleLoading(false);
-    }
+    
+    setGoogleLoading(false);
   };
 
   const handleForgotPassword = () => {

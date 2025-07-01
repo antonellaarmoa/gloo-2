@@ -35,10 +35,10 @@ export default function OnboardingScreen() {
 
   const handleStartCooking = async () => {
     try {
-      await AsyncStorage.setItem('hasSeenOnboarding', 'true');
+      // No guardar hasSeenOnboarding, siempre mostrar onboarding
       router.replace('/(tabs)/home');
     } catch (error) {
-      console.error('Error saving onboarding state:', error);
+      console.error('Error navigating to home:', error);
       router.replace('/(tabs)/home');
     }
   };

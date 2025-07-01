@@ -219,8 +219,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
 
   // Sincronizar estado local con estado global
   React.useEffect(() => {
-    setLocalSavedState(savedRecipes[item.id] || false);
-  }, [savedRecipes[item.id]]);
+    const newSavedState = savedRecipes[item.id] || false;
+    if (localSavedState !== newSavedState) {
+      setLocalSavedState(newSavedState);
+    }
+  }, [savedRecipes[item.id], localSavedState]);
 
   // Verificar si el usuario ya dio like
   const liked = userLikes[item.id] || false;
@@ -284,9 +287,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
   React.useEffect(() => {
     const baseCount = Math.max(0, item.rates || 0);
     const adjustedCount = liked ? baseCount + 1 : baseCount;
-    console.log(`Like count update for ${item.title}: base=${baseCount}, liked=${liked}, adjusted=${adjustedCount}`);
-    setLikeCount(adjustedCount);
-  }, [liked, item.rates]);
+    if (likeCount !== adjustedCount) {
+      console.log(`Like count update for ${item.title}: base=${baseCount}, liked=${liked}, adjusted=${adjustedCount}`);
+      setLikeCount(adjustedCount);
+    }
+  }, [liked, item.rates, likeCount]);
 
   const toggleLike = async () => {
     if (isGuest) {
@@ -307,6 +312,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
   };
 
   const toggleSaved = async () => {
+    if (isGuest) {
+      onGuestLimit();
+      return;
+    }
+    
     if (!userId) return;
     
     // Mostrar indicador de carga
@@ -792,13 +802,14 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId, isLoaded } = useAuth();
   const [activeTab, setActiveTab] = useState('For You');
   const [userLikes, setUserLikes] = useState({});
   const [savedRecipes, setSavedRecipes] = useState({});
   const [followedUsers, setFollowedUsers] = useState({});
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [trendingRecipes, setTrendingRecipes] = useState([]);
+  const [authChecked, setAuthChecked] = useState(false);
   
   // Animation refs for loading dots
   const dot1Anim = useRef(new Animated.Value(0)).current;
@@ -808,7 +819,11 @@ export default function HomeScreen() {
 
   // Loading dots animation
   useEffect(() => {
+    let isMounted = true;
+    
     const animateDots = () => {
+      if (!isMounted) return;
+      
       Animated.sequence([
         Animated.parallel([
           Animated.timing(dot1Anim, {
@@ -854,11 +869,17 @@ export default function HomeScreen() {
             useNativeDriver: true,
           }),
         ]),
-      ]).start(() => animateDots());
+      ]).start(() => {
+        if (isMounted) {
+          animateDots();
+        }
+      });
     };
 
     // Shimmer animation
     const animateShimmer = () => {
+      if (!isMounted) return;
+      
       Animated.loop(
         Animated.sequence([
           Animated.timing(shimmerAnim, {
@@ -879,37 +900,65 @@ export default function HomeScreen() {
 
     animateDots();
     animateShimmer();
-  }, [dot1Anim, dot2Anim, dot3Anim, shimmerAnim]);
+    
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Remove dependencies to prevent re-creation
+
+  // Verificar autenticación al cargar
+  useEffect(() => {
+    if (isLoaded) {
+      setAuthChecked(true);
+    }
+  }, [isLoaded]);
 
   // Cargar datos al montar el componente
   useEffect(() => {
-    if (isSignedIn && userId) {
-      loadLikesLocally().then(likes => setUserLikes(likes));
-      loadSavedRecipesLocally().then(saved => {
-        setSavedRecipes(saved);
-        
-        // Sincronizar con favoritos locales
-        const syncWithFavorites = async () => {
-          try {
-            const combinedSaved = await syncFavoritesWithSavedState(userId, saved);
-            setSavedRecipes(combinedSaved);
-            console.log('Favorites synced with saved state:', Object.keys(combinedSaved).length, 'recipes');
-          } catch (error) {
-            console.error('Error syncing with favorites:', error);
+    let isMounted = true;
+    
+    const loadData = async () => {
+      if (isSignedIn && userId && isMounted) {
+        try {
+          const likes = await loadLikesLocally();
+          if (isMounted) setUserLikes(likes);
+          
+          const saved = await loadSavedRecipesLocally();
+          if (isMounted) {
+            setSavedRecipes(saved);
+            
+            // Sincronizar con favoritos locales
+            try {
+              const combinedSaved = await syncFavoritesWithSavedState(userId, saved);
+              if (isMounted) {
+                setSavedRecipes(combinedSaved);
+                console.log('Favorites synced with saved state:', Object.keys(combinedSaved).length, 'recipes');
+              }
+            } catch (error) {
+              console.error('Error syncing with favorites:', error);
+            }
+            
+            // Reparar favoritos si es necesario
+            repairFavorites(userId).then(repaired => {
+              if (repaired.length > 0 && isMounted) {
+                console.log('Favorites repaired:', repaired.length, 'recipes');
+              }
+            });
           }
-        };
-        
-        syncWithFavorites();
-        
-        // Reparar favoritos si es necesario
-        repairFavorites(userId).then(repaired => {
-          if (repaired.length > 0) {
-            console.log('Favorites repaired:', repaired.length, 'recipes');
-          }
-        });
-      });
-      loadFollowedUsersLocally().then(followed => setFollowedUsers(followed));
-    }
+          
+          const followed = await loadFollowedUsersLocally();
+          if (isMounted) setFollowedUsers(followed);
+        } catch (error) {
+          console.error('Error loading data:', error);
+        }
+      }
+    };
+    
+    loadData();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [isSignedIn, userId]);
 
   const { data, isLoading, error } = useQuery({
@@ -918,6 +967,24 @@ export default function HomeScreen() {
   });
   
   const isGuest = !isSignedIn;
+
+  // Función para manejar acciones de usuarios guest
+  const handleGuestAction = (action) => {
+    Alert.alert(
+      'Inicia sesión',
+      `Para ${action}, necesitas iniciar sesión primero.`,
+      [
+        {
+          text: 'Cancelar',
+          style: 'cancel',
+        },
+        {
+          text: 'Iniciar sesión',
+          onPress: () => router.push('/(auth)/sign-in'),
+        },
+      ]
+    );
+  };
 
   // Función para obtener recetas trending
   const fetchTrendingRecipes = async () => {
@@ -955,12 +1022,27 @@ export default function HomeScreen() {
 
   // Cargar recetas trending cuando se cambia a tab Following
   React.useEffect(() => {
-    if (activeTab === 'Following' && trendingRecipes.length === 0) {
-      fetchTrendingRecipes().then(recipes => {
-        setTrendingRecipes(recipes);
-      });
-    }
-  }, [activeTab]);
+    let isMounted = true;
+    
+    const loadTrending = async () => {
+      if (activeTab === 'Following' && trendingRecipes.length === 0 && isMounted) {
+        try {
+          const recipes = await fetchTrendingRecipes();
+          if (isMounted) {
+            setTrendingRecipes(recipes);
+          }
+        } catch (error) {
+          console.error('Error loading trending recipes:', error);
+        }
+      }
+    };
+    
+    loadTrending();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, trendingRecipes.length]);
 
   // Función para manejar cambios de like
   const handleLikeToggle = async (recipeId, isLiked) => {
@@ -1060,12 +1142,44 @@ export default function HomeScreen() {
   };
 
   useEffect(() => {
-    syncFollowedUsersWithBackend();
+    let isMounted = true;
+    
+    const syncData = async () => {
+      if (userId && isMounted) {
+        try {
+          await syncFollowedUsersWithBackend();
+        } catch (error) {
+          console.error('Error syncing followed users:', error);
+        }
+      }
+    };
+    
+    syncData();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [userId]);
 
   useFocusEffect(
     React.useCallback(() => {
-      syncFollowedUsersWithBackend();
+      let isMounted = true;
+      
+      const syncData = async () => {
+        if (userId && isMounted) {
+          try {
+            await syncFollowedUsersWithBackend();
+          } catch (error) {
+            console.error('Error syncing followed users on focus:', error);
+          }
+        }
+      };
+      
+      syncData();
+      
+      return () => {
+        isMounted = false;
+      };
     }, [userId])
   );
 
@@ -1097,7 +1211,8 @@ export default function HomeScreen() {
     visibleData = visibleData.slice(0, 3);
   }
 
-  if (isLoading) {
+  // Mostrar loading mientras se verifica la autenticación
+  if (!authChecked || isLoading) {
     return (
       <View style={styles.loadingContainer}>
         {/* Background gradient */}
@@ -1160,8 +1275,12 @@ export default function HomeScreen() {
             />
           </View>
           
-          <Text style={styles.loadingTitle}>Cargando recetas deliciosas</Text>
-          <Text style={styles.loadingSubtitle}>Preparando tu experiencia culinaria...</Text>
+          <Text style={styles.loadingTitle}>
+            {!authChecked ? 'Verificando autenticación...' : 'Cargando recetas deliciosas'}
+          </Text>
+          <Text style={styles.loadingSubtitle}>
+            {!authChecked ? 'Preparando tu experiencia...' : 'Preparando tu experiencia culinaria...'}
+          </Text>
           
           {/* Recipe cards skeleton */}
           <View style={styles.skeletonContainer}>
@@ -1274,7 +1393,7 @@ export default function HomeScreen() {
           <PostItem
             item={item}
             isGuest={isGuest}
-            onGuestLimit={() => {}}
+            onGuestLimit={() => handleGuestAction('ver más contenido')}
             index={index}
             userLikes={userLikes}
             setUserLikes={setUserLikes}

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { clearAuthState, checkAuthState } from '../../scripts/clear-auth-state';
 
 export default function SettingsScreen() {
   const { isSignedIn, signOut } = useAuth();
@@ -101,6 +102,46 @@ export default function SettingsScreen() {
         }
       ]
     );
+  };
+
+  // Limpiar estado de autenticación (debug)
+  const handleClearAuthState = async () => {
+    Alert.alert(
+      'Limpiar Estado de Autenticación',
+      '¿Estás seguro de que quieres limpiar el estado de autenticación? Esto puede resolver problemas de sesión.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Limpiar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const success = await clearAuthState();
+              if (success) {
+                Alert.alert('Éxito', 'Estado de autenticación limpiado. Reinicia la app.');
+              } else {
+                Alert.alert('Error', 'No se pudo limpiar el estado de autenticación');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Error inesperado al limpiar estado');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  // Verificar estado de autenticación (debug)
+  const handleCheckAuthState = async () => {
+    try {
+      const authKeys = await checkAuthState();
+      Alert.alert(
+        'Estado de Autenticación',
+        `Se encontraron ${authKeys.length} claves de autenticación.\n\nRevisa la consola para más detalles.`
+      );
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo verificar el estado de autenticación');
+    }
   };
 
   // Renderizar opción de configuración
@@ -256,6 +297,27 @@ export default function SettingsScreen() {
             )}
           </View>
         )}
+
+        {/* Debug (solo para desarrollo) */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Debug</Text>
+          {renderSettingItem(
+            'bug-outline',
+            'Verificar Estado de Auth',
+            'Revisar claves de autenticación',
+            'button',
+            null,
+            handleCheckAuthState
+          )}
+          {renderSettingItem(
+            'refresh-outline',
+            'Limpiar Estado de Auth',
+            'Resolver problemas de sesión',
+            'button',
+            null,
+            handleClearAuthState
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

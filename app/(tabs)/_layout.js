@@ -2,14 +2,16 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import NavBar from '../../components/NavBar';
+// import AuthGuard from '../../components/AuthGuard';
 
 export default function TabLayout() {
   return (
-    <Tabs
-      tabBar={props => <NavBar {...props} />}
-      screenOptions={{
-        headerShown: false,
-      }}>
+    // <AuthGuard requireAuth={false}>
+      <Tabs
+        tabBar={props => <NavBar {...props} />}
+        screenOptions={{
+          headerShown: false,
+        }}>
       <Tabs.Screen
         name="home"
         options={{
@@ -70,7 +72,8 @@ export default function TabLayout() {
           href: null, // This hides the tab from the tab bar
         }}
       />
-    </Tabs>
+          </Tabs>
+    // </AuthGuard>
   );
 }
 

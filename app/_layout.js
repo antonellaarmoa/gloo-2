@@ -14,13 +14,34 @@ const queryClient = new QueryClient();
 
 export default function RootLayout() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
+  const [fontError, setFontError] = useState(null);
 
   useEffect(() => {
+    let isMounted = true;
     Font.loadAsync({
       'DynaPuff': require('../assets/fonts/DynaPuff.ttf'),
       'Inter': require('../assets/fonts/Inter.ttf'),
-    }).then(() => setFontsLoaded(true));
+    })
+      .then(() => {
+        if (isMounted) setFontsLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Error loading fonts:', err);
+        if (isMounted) setFontError(err);
+      });
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  if (fontError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <Text style={{ color: 'red', fontSize: 16, marginBottom: 8 }}>Error cargando fuentes</Text>
+        <Text>{fontError.message || String(fontError)}</Text>
+      </View>
+    );
+  }
 
   if (!fontsLoaded) {
     return (

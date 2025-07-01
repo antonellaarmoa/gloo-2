@@ -8,11 +8,11 @@ import {
   Image,
   ActivityIndicator,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { Feather } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG } from '../config/api';
 
 export default function Following() {
@@ -20,72 +20,61 @@ export default function Following() {
   const { userId } = useAuth();
   const [following, setFollowing] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (userId) {
-      loadFollowing();
+      fetchFollowing();
     }
   }, [userId]);
 
-  const loadFollowing = async () => {
+  const fetchFollowing = async () => {
     try {
       setLoading(true);
       
-      // Cargar seguidos desde AsyncStorage (estado local)
-      const followedUsers = await AsyncStorage.getItem('@gloo:followedUsers');
-      const localFollowing = followedUsers ? JSON.parse(followedUsers) : {};
-      
-      // Convertir el objeto de seguidos a array de usuarios
-      const followingArray = Object.keys(localFollowing)
-        .filter(userId => localFollowing[userId] === true)
-        .map(userId => ({
-          id: userId,
-          username: `user_${userId.slice(0, 8)}`,
-          firstName: 'Usuario',
-          lastName: '',
-          profileImage: null,
-          isFollowing: true
-        }));
-      
-      setFollowing(followingArray);
-      
-      // Intentar cargar datos adicionales desde el backend si está disponible
+      // Intentar cargar seguidos desde el backend
       try {
         const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/following`);
         if (res.ok) {
           const data = await res.json();
+          console.log('Following API response:', data);
           if (data.success && data.data && data.data.following) {
-            // Combinar datos del backend con datos locales
-            const backendFollowing = data.data.following.map(user => ({
-              ...user,
-              isFollowing: true
-            }));
-            setFollowing(backendFollowing);
+            console.log('Following users found:', data.data.following.length);
+            setFollowing(data.data.following);
+          } else {
+            console.log('No following data in response');
+            setFollowing([]);
           }
+        } else {
+          console.log('Backend following endpoint not available, status:', res.status);
+          setFollowing([]);
         }
       } catch (backendError) {
-        console.log('Backend not available, using local data only:', backendError);
+        console.log('Backend not available for following:', backendError);
+        setFollowing([]);
       }
       
     } catch (error) {
-      console.error('Error loading following:', error);
+      console.error('Error fetching following:', error);
       setFollowing([]);
     } finally {
       setLoading(false);
     }
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchFollowing();
+    setRefreshing(false);
+  };
+
   const handleUnfollow = async (targetUserId) => {
     try {
-      // Actualizar estado local inmediatamente
-      const newFollowing = following.filter(user => user.id !== targetUserId);
-      setFollowing(newFollowing);
+      console.log('Unfollowing user:', targetUserId);
       
-      // Actualizar AsyncStorage
-      const followedUsers = await AsyncStorage.getItem('@gloo:followedUsers');
-      const localFollowing = followedUsers ? JSON.parse(followedUsers) : {};
-      localFollowing[targetUserId] = false;
-      await AsyncStorage.setItem('@gloo:followedUsers', JSON.stringify(localFollowing));
+      // Actualizar estado local inmediatamente
+      const newFollowing = following.filter(user => user.followingId !== targetUserId);
+      setFollowing(newFollowing);
       
       // Intentar sincronizar con backend
       try {
@@ -99,18 +88,29 @@ export default function Following() {
         
         if (res.ok) {
           console.log('Successfully unfollowed user on backend');
+          Alert.alert('✅ Dejaste de seguir', 'Usuario removido de tu lista de seguidos');
+          // Refrescar la lista para asegurar sincronización
+          setTimeout(() => {
+            fetchFollowing();
+          }, 500);
         } else {
-          console.log('Backend unfollow failed, but local state updated');
+          console.log('Backend unfollow failed, status:', res.status);
+          Alert.alert('Info', 'No se pudo dejar de seguir al usuario en este momento');
+          // Revertir el estado local si falló
+          fetchFollowing();
         }
       } catch (backendError) {
         console.log('Backend not available for unfollow:', backendError);
+        Alert.alert('Info', 'No se pudo dejar de seguir al usuario en este momento');
+        // Revertir el estado local si falló
+        fetchFollowing();
       }
-      
-      Alert.alert('✅ Dejaste de seguir', 'Usuario removido de tu lista de seguidos');
       
     } catch (error) {
       console.error('Error unfollowing user:', error);
       Alert.alert('Error', 'No se pudo dejar de seguir al usuario');
+      // Revertir el estado local si falló
+      fetchFollowing();
     }
   };
 
@@ -121,23 +121,23 @@ export default function Following() {
         // Navegar al perfil del usuario
         router.push({
           pathname: '/public-profile',
-          params: { userId: item.id }
+          params: { userId: item.followingId || item.id }
         });
       }}
     >
       <Image 
-        source={item.profileImage ? { uri: item.profileImage } : require('../assets/user.jpeg')} 
+        source={item.user?.imageUrl ? { uri: item.user.imageUrl } : require('../assets/user.jpeg')} 
         style={styles.followingAvatar} 
       />
       <View style={styles.followingInfo}>
         <Text style={styles.followingName}>
-          {item.firstName} {item.lastName}
+          {item.user?.firstName || 'Usuario'} {item.user?.lastName || ''}
         </Text>
-        <Text style={styles.followingUsername}>@{item.username}</Text>
+        <Text style={styles.followingUsername}>@{item.user?.username || 'usuario'}</Text>
       </View>
       <TouchableOpacity 
         style={styles.unfollowButton}
-        onPress={() => handleUnfollow(item.id)}
+        onPress={() => handleUnfollow(item.followingId || item.id)}
       >
         <Text style={styles.unfollowButtonText}>Dejar de seguir</Text>
       </TouchableOpacity>
@@ -159,7 +159,9 @@ export default function Following() {
           <Feather name="arrow-left" size={24} color="#222" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Siguiendo</Text>
-        <View style={styles.placeholder} />
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshButton}>
+          <Feather name="refresh-cw" size={20} color="#E2773C" />
+        </TouchableOpacity>
       </View>
 
       {following.length === 0 ? (
@@ -174,6 +176,14 @@ export default function Following() {
           keyExtractor={(item) => item.id || item.userId}
           contentContainerStyle={styles.listContainer}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#E2773C']}
+              tintColor="#E2773C"
+            />
+          }
         />
       )}
     </View>
@@ -210,8 +220,8 @@ const styles = StyleSheet.create({
     color: '#222',
     fontFamily: 'Inter',
   },
-  placeholder: {
-    width: 40,
+  refreshButton: {
+    padding: 8,
   },
   listContainer: {
     paddingVertical: 16,
