@@ -4,6 +4,7 @@ import ConfettiCannon from 'react-native-confetti-cannon';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { API_CONFIG, buildApiUrl } from '../config/api';
+import RatingStars from '../components/RatingStars';
 
 const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
@@ -61,17 +62,16 @@ export default function FinishScreen() {
 
       <Text style={styles.subtitle}>Share Your Opinion With Others</Text>
 
-      <View style={styles.ratingContainer}>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <TouchableOpacity key={i} onPress={() => handleRate(i)}>
-            <Ionicons
-              name={i <= rating ? 'star' : 'star-outline'}
-              size={32}
-              color="#FF9800"
-            />
-          </TouchableOpacity>
-        ))}
-      </View>
+      <RatingStars
+        recipeId={recipeId}
+        size={32}
+        showCount={true}
+        showAverage={true}
+        interactive={true}
+        onRatingChange={(rating, stats) => {
+          console.log('Rating submitted:', rating, stats);
+        }}
+      />
 
       <TouchableOpacity
         style={styles.recipesButton}

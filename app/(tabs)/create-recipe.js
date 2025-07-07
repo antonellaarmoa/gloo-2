@@ -88,6 +88,26 @@ export default function CreateRecipeScreen() {
     loadDraft();
   }, []);
 
+  // Manejar modo de edición desde AsyncStorage
+  useEffect(() => {
+    const checkForEditingRecipe = async () => {
+      try {
+        const editingRecipeData = await AsyncStorage.getItem('@gloo:editingRecipe');
+        if (editingRecipeData) {
+          const recipeData = JSON.parse(editingRecipeData);
+          console.log('Cargando receta para editar desde AsyncStorage:', recipeData);
+          loadRecipeForEditing(recipeData);
+          // Limpiar el dato de AsyncStorage después de cargarlo
+          await AsyncStorage.removeItem('@gloo:editingRecipe');
+        }
+      } catch (error) {
+        console.error('Error loading editing recipe from AsyncStorage:', error);
+      }
+    };
+    
+    checkForEditingRecipe();
+  }, []);
+
   // Limpiar campos al entrar si no hay borrador
   useFocusEffect(
     React.useCallback(() => {
@@ -199,6 +219,33 @@ export default function CreateRecipeScreen() {
     setRecipeId(null);
   };
 
+  const loadRecipeForEditing = (recipeData) => {
+    console.log('Cargando receta para editar:', recipeData);
+    
+    setTitle(recipeData.title || '');
+    setDescription(recipeData.description || '');
+    setPrepTime(recipeData.estimatedTime ? Math.floor(recipeData.estimatedTime / 2).toString() : '');
+    setCookTime(recipeData.servings ? recipeData.servings.toString() : '');
+    setRecipeImage(recipeData.image || recipeData.media || null);
+    setRecipeId(recipeData.id);
+    setIsEditingExisting(true);
+    
+    // Cargar ingredientes
+    if (recipeData.ingredients && Array.isArray(recipeData.ingredients)) {
+      setIngredients(recipeData.ingredients);
+    }
+    
+    // Cargar instrucciones/pasos
+    if (recipeData.instructions && Array.isArray(recipeData.instructions)) {
+      const stepsWithKeys = recipeData.instructions.map((instruction, index) => ({
+        key: (index + 1).toString(),
+        text: instruction.description || instruction.text || '',
+        media: instruction.image || instruction.media || null,
+      }));
+      setSteps(stepsWithKeys.length > 0 ? stepsWithKeys : [{ key: '1', text: '', media: null }]);
+    }
+  };
+
   // Función para convertir imagen local a base64
   const convertImageToBase64 = async (imageUri) => {
     try {
@@ -299,6 +346,64 @@ export default function CreateRecipeScreen() {
     } catch (error) {
       console.error('Error creating recipe:', error);
       Alert.alert('Error', 'No se pudo crear la receta. Intenta nuevamente.');
+      throw error;
+    }
+  };
+
+  // Función para actualizar la receta en el backend
+  const updateRecipe = async (recipeId, recipeData) => {
+    try {
+      const media = recipeData.recipeImage || null;
+      const instructions = (recipeData.instructions || []).map((inst) => ({
+        description: inst.text || inst.description || '',
+        image: inst.media || null,
+      }));
+      const payload = {
+        title: recipeData.title,
+        description: recipeData.description,
+        estimatedTime: recipeData.estimatedTime,
+        servings: recipeData.servings,
+        media,
+        ingredients: recipeData.ingredients,
+        instructions,
+      };
+      console.log('Payload para actualizar receta:', payload);
+      const url = API_URLS.RECIPES.UPDATE(recipeId);
+      const result = await makeApiRequest(url, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      console.log('Respuesta del backend (actualización):', result);
+      if (result.success) {
+        Alert.alert(
+          "¡Éxito!",
+          "Tu receta ha sido actualizada correctamente.",
+          [
+            {
+              text: "Ver mi receta",
+              onPress: () => {
+                router.push(`/recipe/${recipeId}`);
+              }
+            },
+            {
+              text: "OK",
+              onPress: () => {
+                router.back();
+              }
+            }
+          ]
+        );
+        // Limpiar formulario después de actualizar
+        clearForm();
+        clearDraft();
+      } else {
+        const errorMsg = result.data?.error || 'No se pudo actualizar la receta. Intenta nuevamente.';
+        Alert.alert('Error', errorMsg);
+      }
+      return result;
+    } catch (error) {
+      console.error('Error updating recipe:', error);
+      Alert.alert('Error', 'No se pudo actualizar la receta. Intenta nuevamente.');
       throw error;
     }
   };
@@ -516,43 +621,72 @@ export default function CreateRecipeScreen() {
         createdBy: userId,
         updatedBy: userId,
       };
-      const result = await createRecipe(recipeData);
+
+      let result;
+      if (isEditingExisting && recipeId) {
+        // Actualizar receta existente
+        result = await updateRecipe(recipeId, recipeData);
+      } else {
+        // Crear nueva receta
+        result = await createRecipe(recipeData);
+      }
 
       // Mostrar mensaje de éxito y navegar
-      Alert.alert(
-        "¡Éxito!",
-        "Tu receta ha sido creada y publicada correctamente.",
-        [
-          {
-            text: "Ver mi receta",
-            onPress: () => {
-              router.push('/recipecreated');
-            }
-          },
-          {
-            text: "Crear otra",
-            onPress: async () => {
-              // Limpiar formulario solo si NO hay borrador guardado
-              const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
-              if (!draftData) {
-                setTitle('');
-                setDescription('');
-                setPrepTime('');
-                setCookTime('');
-                setIngredients([]);
-                setSteps([{ key: '1', text: '', media: null }]);
-                setRecipeImage(null);
-                setNewIngredient('');
-                setNewAmount('');
-                setNewUnit('');
-                setIsEditingExisting(false);
-                setRecipeId(null);
+      if (isEditingExisting && recipeId) {
+        Alert.alert(
+          "¡Éxito!",
+          "Tu receta ha sido actualizada correctamente.",
+          [
+            {
+              text: "Ver mi receta",
+              onPress: () => {
+                router.push(`/recipe/${recipeId}`);
               }
-              clearDraft();
+            },
+            {
+              text: "OK",
+              onPress: () => {
+                router.back();
+              }
             }
-          }
-        ]
-      );
+          ]
+        );
+      } else {
+        Alert.alert(
+          "¡Éxito!",
+          "Tu receta ha sido creada y publicada correctamente.",
+          [
+            {
+              text: "Ver mi receta",
+              onPress: () => {
+                router.push('/recipecreated');
+              }
+            },
+            {
+              text: "Crear otra",
+              onPress: async () => {
+                // Limpiar formulario solo si NO hay borrador guardado
+                const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
+                if (!draftData) {
+                  setTitle('');
+                  setDescription('');
+                  setPrepTime('');
+                  setCookTime('');
+                  setIngredients([]);
+                  setSteps([{ key: '1', text: '', media: null }]);
+                  setRecipeImage(null);
+                  setNewIngredient('');
+                  setNewAmount('');
+                  setNewUnit('');
+                  setIsEditingExisting(false);
+                  setRecipeId(null);
+                }
+                clearDraft();
+              }
+            }
+          ]
+        );
+      }
       // Limpiar campos SIEMPRE después de publicar
       setTitle('');
       setDescription('');
@@ -684,8 +818,12 @@ export default function CreateRecipeScreen() {
                 <Ionicons name="chevron-back" size={24} color="#1e293b" />
               </TouchableOpacity>
               <View style={styles.headerTitleContainer}>
-                <Text style={styles.headerTitle}>New Recipe</Text>
-                <Text style={styles.headerSubtitle}>Create & share your recipe</Text>
+                <Text style={styles.headerTitle}>
+                  {isEditingExisting ? 'Edit Recipe' : 'New Recipe'}
+                </Text>
+                <Text style={styles.headerSubtitle}>
+                  {isEditingExisting ? 'Update your recipe' : 'Create & share your recipe'}
+                </Text>
               </View>
               <View style={{ width: 24 }} />
             </View>
@@ -703,7 +841,9 @@ export default function CreateRecipeScreen() {
                     <Text style={styles.headerBtnText}>Publicando...</Text>
                   </View>
                 ) : (
-                  <Text style={styles.headerBtnText}>Publish</Text>
+                  <Text style={styles.headerBtnText}>
+                    {isEditingExisting ? 'Update' : 'Publish'}
+                  </Text>
                 )}
               </TouchableOpacity>
               <TouchableOpacity 

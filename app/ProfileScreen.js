@@ -311,6 +311,17 @@ export default function ProfileScreen() {
   const handleEditProfilePress = () => router.push('/edit-profile');
   const handleAccountDetailsPress = () => router.push('/account-details');
 
+  const handleEditRecipe = (recipe) => {
+    console.log('Editando receta:', recipe);
+    // Navegar a la pantalla de edición con los datos de la receta
+    router.push({
+      pathname: '/edit-recipe',
+      params: { 
+        recipeData: JSON.stringify(recipe)
+      }
+    });
+  };
+
   // Modal de colección custom
   const openCollectionModal = async (collection) => {
     const recipes = await getRecipesFromCustomCollection(userId, collection.id);
@@ -580,6 +591,8 @@ export default function ProfileScreen() {
                       estimatedTime: item.estimatedTime || item.duration || 30,
                     }}
                     onPress={() => router.push(`/recipe/${item.id}`)}
+                    onEdit={(recipe) => handleEditRecipe(recipe)}
+                    isOwner={true}
                   />
                 </View>
               )}

@@ -1,12 +1,13 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
-export default function RecipeCard({ recipe, onPress }) {
+export default function RecipeCard({ recipe, onPress, onEdit, isOwner = false }) {
   // Obtener rating promedio de diferentes posibles campos del backend
   const getRating = () => {
-    const rating = recipe.averageRating || recipe.rating || recipe.rates || recipe.stars || 0;
+    const rating = recipe.averageRating || recipe.rating || recipe.stats?.averageRating || 0;
     return rating > 0 ? rating.toFixed(1) : '4.2';
   };
   
@@ -18,7 +19,12 @@ export default function RecipeCard({ recipe, onPress }) {
 
   // Obtener contador de comentarios del backend
   const getCommentCount = () => {
-    return recipe.comments || 0;
+    return recipe.comments || recipe.stats?.comments || 0;
+  };
+
+  // Obtener contador de likes del backend
+  const getLikeCount = () => {
+    return recipe.likes || recipe.stats?.likes || 0;
   };
 
   // Obtener imagen de la receta
@@ -39,9 +45,23 @@ export default function RecipeCard({ recipe, onPress }) {
 
   const [imageError, setImageError] = React.useState(false);
 
+  const handleEditPress = (e) => {
+    e.stopPropagation(); // Evitar que se active el onPress de la card
+    if (onEdit) {
+      onEdit(recipe);
+    }
+  };
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
-      <Image source={imageError ? require('../assets/hamburguesa.png') : getRecipeImage()} style={styles.image} onError={() => setImageError(true)} />
+      <View style={styles.imageContainer}>
+        <Image source={imageError ? require('../assets/hamburguesa.png') : getRecipeImage()} style={styles.image} onError={() => setImageError(true)} />
+        {isOwner && (
+          <TouchableOpacity style={styles.editButton} onPress={handleEditPress}>
+            <Ionicons name="pencil" size={16} color="#fff" />
+          </TouchableOpacity>
+        )}
+      </View>
       <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
         {recipe.title || 'Sin título'}
       </Text>
@@ -49,9 +69,18 @@ export default function RecipeCard({ recipe, onPress }) {
         {recipe.description || 'Sin descripción'}
       </Text>
       <View style={styles.footer}>
-        <Text style={styles.meta}>⭐ {getRating()}</Text>
-        <Text style={styles.meta}>⏱ {getCookingTime()}</Text>
-        <Text style={styles.meta}>💬 {getCommentCount()}</Text>
+        <View style={styles.metaItem}>
+          <Ionicons name="star" size={12} color="#fbbf24" />
+          <Text style={styles.meta}>{getRating()}</Text>
+        </View>
+        <View style={styles.metaItem}>
+          <Ionicons name="time-outline" size={12} color="#E2773C" />
+          <Text style={styles.meta}>{getCookingTime()}</Text>
+        </View>
+        <View style={styles.metaItem}>
+          <Ionicons name="heart-outline" size={12} color="#ef4444" />
+          <Text style={styles.meta}>{getLikeCount()}</Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -74,11 +103,30 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: '#e0e0e0',
   },
+  imageContainer: {
+    position: 'relative',
+  },
   image: {
     width: '100%',
     height: 90,
     borderRadius: 8,
     resizeMode: 'cover',
+  },
+  editButton: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 16,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   title: {
     fontWeight: 'bold',
@@ -98,6 +146,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 6,
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
   },
   meta: {
     fontSize: 11,

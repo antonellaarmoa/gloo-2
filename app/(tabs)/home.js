@@ -225,6 +225,28 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
     }
   }, [savedRecipes[item.id], localSavedState]);
 
+  // Verificar estado de favoritos al montar el componente
+  React.useEffect(() => {
+    const checkFavoriteStatus = async () => {
+      if (userId && item.id) {
+        try {
+          const isFav = await isRecipeFavorite(userId, item.id);
+          if (isFav !== localSavedState) {
+            setLocalSavedState(isFav);
+            // También actualizar el estado global si es necesario
+            if (isFav !== (savedRecipes[item.id] || false)) {
+              onSaveToggle(item.id, isFav);
+            }
+          }
+        } catch (error) {
+          console.error('Error checking favorite status:', error);
+        }
+      }
+    };
+    
+    checkFavoriteStatus();
+  }, [userId, item.id]);
+
   // Verificar si el usuario ya dio like
   const liked = userLikes[item.id] || false;
   
@@ -748,10 +770,15 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
           </View>
           <View style={styles.actionsContainer}>
             <LikeButton
+              recipeId={item.id}
               initialCount={item.likes || item.rates || 0}
               size={30}
               style={styles.actionIcon}
               showCount={true}
+              onLikeChange={(isLiked, newCount) => {
+                // Actualizar el estado local si es necesario
+                console.log('Like changed:', isLiked, newCount);
+              }}
             />
             <TouchableOpacity style={styles.actionIcon} onPress={isGuest ? onGuestLimit : () => router.push({ pathname: '/comment', params: { id: item.id } })}>
               <View style={styles.iconContainer}>
@@ -793,6 +820,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
         onSaved={(recipeId, isSaved) => {
           setShowSaveModal(false);
           setLocalSavedState(isSaved);
+          onSaveToggle(recipeId, isSaved); // Actualizar estado global
           if (global.refreshProfileFavorites) global.refreshProfileFavorites();
         }}
       />
@@ -809,6 +837,7 @@ export default function HomeScreen() {
   const [followedUsers, setFollowedUsers] = useState({});
   const [showGuestModal, setShowGuestModal] = useState(false);
   const [trendingRecipes, setTrendingRecipes] = useState([]);
+  const [followingRecipes, setFollowingRecipes] = useState([]);
   const [authChecked, setAuthChecked] = useState(false);
   
   // Animation refs for loading dots
@@ -1020,29 +1049,69 @@ export default function HomeScreen() {
     }
   };
 
-  // Cargar recetas trending cuando se cambia a tab Following
+  const fetchFollowingRecipes = async () => {
+    if (!userId) return [];
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/recipes/following/${userId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.data || [];
+      } else {
+        console.log('Error fetching following recipes:', response.status);
+        return [];
+      }
+    } catch (error) {
+      console.log('Error fetching following recipes:', error);
+      return [];
+    }
+  };
+
+  // Cargar recetas de following cuando se cambia a tab Following
   React.useEffect(() => {
     let isMounted = true;
     
-    const loadTrending = async () => {
-      if (activeTab === 'Following' && trendingRecipes.length === 0 && isMounted) {
+    const loadFollowing = async () => {
+      if (activeTab === 'Following' && followingRecipes.length === 0 && isMounted) {
         try {
-          const recipes = await fetchTrendingRecipes();
+          const recipes = await fetchFollowingRecipes();
           if (isMounted) {
-            setTrendingRecipes(recipes);
+            setFollowingRecipes(recipes);
           }
         } catch (error) {
-          console.error('Error loading trending recipes:', error);
+          console.error('Error loading following recipes:', error);
         }
       }
     };
     
-    loadTrending();
+    loadFollowing();
     
     return () => {
       isMounted = false;
     };
-  }, [activeTab, trendingRecipes.length]);
+  }, [activeTab, followingRecipes.length, userId]);
+
+  // Recargar recetas de following cuando se cambia a tab Following
+  React.useEffect(() => {
+    if (activeTab === 'Following' && userId) {
+      const loadFollowing = async () => {
+        try {
+          const recipes = await fetchFollowingRecipes();
+          setFollowingRecipes(recipes);
+        } catch (error) {
+          console.error('Error loading following recipes:', error);
+        }
+      };
+      
+      loadFollowing();
+    }
+  }, [activeTab, userId]);
 
   // Función para manejar cambios de like
   const handleLikeToggle = async (recipeId, isLiked) => {
@@ -1186,7 +1255,7 @@ export default function HomeScreen() {
   // Determinar qué datos mostrar según el tab activo
   let visibleData = data;
   if (activeTab === 'Following') {
-    visibleData = trendingRecipes.length > 0 ? trendingRecipes : data;
+    visibleData = followingRecipes.length > 0 ? followingRecipes : [];
   }
   
   console.log('Data source:', { 
@@ -1386,32 +1455,46 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      <FlatList
-        data={visibleData}
-        keyExtractor={item => item.id?.toString() || item._id?.toString() || Math.random().toString()}
-        renderItem={({ item, index }) => (
-          <PostItem
-            item={item}
-            isGuest={isGuest}
-            onGuestLimit={() => handleGuestAction('ver más contenido')}
-            index={index}
-            userLikes={userLikes}
-            setUserLikes={setUserLikes}
-            savedRecipes={savedRecipes}
-            onSaveToggle={handleSaveToggle}
-            followedUsers={followedUsers}
-            onFollowToggle={setFollowedUsers}
+      {activeTab === 'Following' && followingRecipes.length === 0 ? (
+        <View style={styles.emptyStateContainer}>
+          <Image 
+            source={require('../../assets/glooenojado.png')} 
+            style={styles.emptyStateImage}
+            resizeMode="contain"
           />
-        )}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        onEndReached={() => {
-          if (isGuest && Array.isArray(data) && data.length > 3) {
-            setShowGuestModal(true);
-          }
-        }}
-        onEndReachedThreshold={0.1}
-      />
+          <Text style={styles.emptyStateTitle}>No hay recetas para mostrar</Text>
+          <Text style={styles.emptyStateSubtitle}>
+            Comienza a seguir a otros usuarios para ver sus recetas aquí
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={visibleData}
+          keyExtractor={item => item.id?.toString() || item._id?.toString() || Math.random().toString()}
+          renderItem={({ item, index }) => (
+            <PostItem
+              item={item}
+              isGuest={isGuest}
+              onGuestLimit={() => handleGuestAction('ver más contenido')}
+              index={index}
+              userLikes={userLikes}
+              setUserLikes={setUserLikes}
+              savedRecipes={savedRecipes}
+              onSaveToggle={handleSaveToggle}
+              followedUsers={followedUsers}
+              onFollowToggle={setFollowedUsers}
+            />
+          )}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          onEndReached={() => {
+            if (isGuest && Array.isArray(data) && data.length > 3) {
+              setShowGuestModal(true);
+            }
+          }}
+          onEndReachedThreshold={0.1}
+        />
+      )}
       <Modal
         visible={showGuestModal}
         transparent
@@ -2002,6 +2085,31 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     fontSize: 12,
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 60,
+  },
+  emptyStateImage: {
+    width: 120,
+    height: 120,
+    marginBottom: 24,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1e293b',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  emptyStateSubtitle: {
+    fontSize: 16,
+    color: '#64748b',
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });
 

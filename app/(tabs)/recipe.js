@@ -24,6 +24,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
 import SaveRecipeModal from '../../components/SaveRecipeModal';
 import LikeButton from '../../components/LikeButton';
+import RatingStars from '../../components/RatingStars';
+import { syncFavoritesWithSavedState, isRecipeFavorite } from '../../utils/favoritesManager';
 
 const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 
@@ -202,13 +204,46 @@ export default function RecipeScreen() {
   useEffect(() => {
     const loadSaved = async () => {
       const localSaved = await AsyncStorage.getItem('@gloo:savedRecipes');
-      setSavedRecipes(localSaved ? JSON.parse(localSaved) : {});
+      const savedData = localSaved ? JSON.parse(localSaved) : {};
+      setSavedRecipes(savedData);
+      
+      // Sincronizar con favoritos locales
+      if (isSignedIn && userId) {
+        try {
+          const combinedSaved = await syncFavoritesWithSavedState(userId, savedData);
+          setSavedRecipes(combinedSaved);
+          console.log('Favorites synced with saved state:', Object.keys(combinedSaved).length, 'recipes');
+        } catch (error) {
+          console.error('Error syncing with favorites:', error);
+        }
+      }
     };
     loadSaved();
     // Escuchar cambios globales
     global.refreshProfileFavorites = loadSaved;
     return () => { global.refreshProfileFavorites = undefined; };
-  }, []);
+  }, [isSignedIn, userId]);
+
+  // Verificar estado de favoritos al montar el componente
+  useEffect(() => {
+    const checkFavoriteStatus = async () => {
+      if (isSignedIn && userId && recipeId) {
+        try {
+          const isFav = await isRecipeFavorite(userId, recipeId);
+          const currentSaved = savedRecipes[recipeId] || false;
+          if (isFav !== currentSaved) {
+            const newSaved = { ...savedRecipes, [recipeId]: isFav };
+            setSavedRecipes(newSaved);
+            await AsyncStorage.setItem('@gloo:savedRecipes', JSON.stringify(newSaved));
+          }
+        } catch (error) {
+          console.error('Error checking favorite status:', error);
+        }
+      }
+    };
+    
+    checkFavoriteStatus();
+  }, [isSignedIn, userId, recipeId]);
 
   const handleSaveToggle = async (recipeId, isSaved) => {
     const newSaved = { ...savedRecipes, [recipeId]: isSaved };
@@ -771,10 +806,15 @@ export default function RecipeScreen() {
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <LikeButton
+              recipeId={recipeId}
               initialCount={likeCount}
               size={24}
               style={styles.actionButton}
               showCount={true}
+              onLikeChange={(isLiked, newCount) => {
+                setLikeCount(newCount);
+                setIsLiked(isLiked);
+              }}
             />
             <TouchableOpacity onPress={() => setShowSaveModal(true)}>
               <View style={[styles.iconContainer, isSaved && styles.iconContainerSaved]}>
@@ -893,22 +933,16 @@ export default function RecipeScreen() {
           {/* Rating Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Rate this recipe</Text>
-            <View style={styles.ratingContainer}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <TouchableOpacity
-                  key={star}
-                  style={styles.starButton}
-                  onPress={() => handleRating(star)}
-                >
-                  <Ionicons
-                    name={star <= rating ? "star" : "star-outline"}
-                    size={24}
-                    color={star <= rating ? "#fbbf24" : "#ccc"}
-                  />
-                </TouchableOpacity>
-              ))}
-            </View>
-            <Text style={styles.ratingText}>Your rating: {rating}/5</Text>
+            <RatingStars
+              recipeId={recipeId}
+              size={24}
+              showCount={true}
+              showAverage={true}
+              interactive={true}
+              onRatingChange={(rating, stats) => {
+                console.log('Rating changed:', rating, stats);
+              }}
+            />
           </View>
 
           {/* Comments Section */}
@@ -1034,6 +1068,7 @@ export default function RecipeScreen() {
           userId={userId}
           onSaved={(recipeId, isSaved) => {
             setShowSaveModal(false);
+            handleSaveToggle(recipeId, isSaved); // Actualizar estado local
             if (global.refreshProfileFavorites) global.refreshProfileFavorites();
           }}
         />
