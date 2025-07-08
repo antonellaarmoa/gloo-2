@@ -119,7 +119,6 @@ export const handleSignIn = async (signIn, setActive, credentials, router) => {
     await setActive({ session: completeSignIn.createdSessionId });
     
     console.log('Sesión activada, redirigiendo...');
-    // Usar setTimeout para evitar redirecciones inmediatas
     setTimeout(() => {
       router.replace('/(tabs)/home');
     }, 500);
@@ -159,7 +158,6 @@ export const handleSignUp = async (signUp, setActive, userData, router) => {
     await setActive({ session: completeSignUp.createdSessionId });
     
     console.log('Sesión activada, redirigiendo...');
-    // Usar setTimeout para evitar redirecciones inmediatas
     setTimeout(() => {
       router.replace('/(tabs)/home');
     }, 500);
@@ -195,7 +193,6 @@ export const handleOAuth = async (startOAuthFlow, setActive, router) => {
       await setActive({ session: createdSessionId });
       
       console.log('Sesión activada, redirigiendo...');
-      // Usar setTimeout para evitar redirecciones inmediatas
       setTimeout(() => {
         router.replace('/(tabs)/home');
       }, 500);

@@ -1,16 +1,38 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, ImageBackground, StatusBar, Platform, Animated } from 'react-native';
+import * as Font from 'expo-font';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useUser } from '@clerk/clerk-expo';
 
 const { width, height } = Dimensions.get('window');
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const { user, isLoaded } = useUser();
   const fadeAnim = new Animated.Value(0);
   const slideAnim = new Animated.Value(40);
   const logoScale = new Animated.Value(0.9);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
+  const [fontError, setFontError] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    Font.loadAsync({
+      'DynaPuff': require('../assets/fonts/DynaPuff.ttf'),
+      'Inter': require('../assets/fonts/Inter.ttf'),
+    })
+      .then(() => {
+        if (isMounted) setFontsLoaded(true);
+      })
+      .catch((err) => {
+        console.error('Error loading fonts:', err);
+        if (isMounted) setFontError(err);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     Animated.parallel([
@@ -35,13 +57,29 @@ export default function OnboardingScreen() {
 
   const handleStartCooking = async () => {
     try {
-      // No guardar hasSeenOnboarding, siempre mostrar onboarding
       router.replace('/(tabs)/home');
     } catch (error) {
-      console.error('Error navigating to home:', error);
+      console.error('Error navigating:', error);
       router.replace('/(tabs)/home');
     }
   };
+
+  if (fontError) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <Text style={{ color: 'red', fontSize: 16, marginBottom: 8 }}>Error cargando fuentes</Text>
+        <Text>{fontError.message || String(fontError)}</Text>
+      </View>
+    );
+  }
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <Text>Cargando fuentes...</Text>
+      </View>
+    );
+  }
 
   return (
     <ImageBackground
@@ -169,6 +207,7 @@ const styles = StyleSheet.create({
     fontSize: Math.min(width * 0.044, 18),
     fontWeight: '600',
     letterSpacing: 0.3,
+    fontFamily: 'Inter',
   },
   glooCharacterLarge: {
     width: 170,
@@ -183,205 +222,26 @@ const styles = StyleSheet.create({
   },
   welcomeText: {
     color: '#1e293b',
-    fontSize: 22,
-    fontWeight: '700',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 0,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,0.7)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
-  buttonIcon: {
-    marginLeft: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  startIcon: {
-    width: 22,
-    height: 22,
-    tintColor: '#fff',
-  },
-  glooLogoXLarge: {
-    width: 270,
-    height: 100,
-    marginTop: -10,
-    marginBottom: 0,
-  },
-  glooCharacterXLarge: {
-    width: 210,
-    height: 210,
-    marginBottom: 0,
-  },
-  glooLogoXXLarge: {
-    width: 320,
-    height: 120,
-    marginTop: -10,
-    marginBottom: 0,
-  },
-  welcomeTextImpact: {
-    color: '#1e293b',
-    fontSize: 32,
-    fontWeight: '900',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
-    letterSpacing: 1.2,
-  },
-  subtitleOnboardingImpact: {
-    color: '#1e40af',
-    fontSize: 18,
-    fontFamily: 'Inter',
-    textAlign: 'center',
-    marginBottom: 0,
-    fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    lineHeight: 26,
-  },
-  glooLogoHuge: {
-    width: 370,
-    height: 140,
-    marginTop: -10,
-    marginBottom: 0,
-  },
-  welcomeTextPlayful: {
-    color: '#f97316',
-    fontSize: 36,
-    fontWeight: '900',
-    fontFamily: 'DynaPuff',
-    marginTop: 8,
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
-    letterSpacing: 1.5,
-  },
-  subtitleOnboardingShort: {
-    color: '#1e40af',
-    fontSize: 20,
-    fontFamily: 'Inter',
-    textAlign: 'center',
-    marginBottom: 0,
-    fontWeight: '700',
-    textShadowColor: 'rgba(255,255,255,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    lineHeight: 26,
-  },
-  glooLogoMassive: {
-    width: 440,
-    height: 170,
-    marginTop: -10,
-    marginBottom: 0,
-  },
-  welcomeTextModern: {
-    color: '#1e40af',
-    fontSize: 38,
-    fontWeight: '900',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
-    letterSpacing: 1.1,
-  },
-  subtitleOnboardingWarm: {
-    color: '#1e293b',
-    fontSize: 20,
-    fontFamily: 'Inter',
-    textAlign: 'center',
-    marginBottom: 0,
-    fontWeight: '600',
-    textShadowColor: 'rgba(255,255,255,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    lineHeight: 28,
+  whiteOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(255,255,255,0.65)',
   },
   logoBlockTight: {
     alignItems: 'center',
-    marginBottom: 8,
-    gap: -16,
+    marginBottom: 0,
+    marginTop: -40,
+  },
+  glooCharacterXLarge: {
+    width: 200,
+    height: 200,
+    marginBottom: 0,
   },
   glooLogoMassiveTight: {
-    width: 440,
-    height: 170,
-    marginTop: -32,
+    width: 260,
+    height: 90,
+    marginTop: -10,
     marginBottom: 0,
-  },
-  inviteText: {
-    color: '#1e40af',
-    fontSize: 30,
-    fontWeight: '900',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 8,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,1)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 10,
-    letterSpacing: 1.1,
-  },
-  subtitleOnboardingReadable: {
-    color: '#1e293b',
-    fontSize: 22,
-    fontFamily: 'Inter',
-    textAlign: 'center',
-    marginBottom: 0,
-    fontWeight: '700',
-    textShadowColor: 'rgba(255,255,255,1)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 10,
-    lineHeight: 30,
-  },
-  welcomeToText: {
-    color: '#1e40af',
-    fontSize: 34,
-    fontWeight: '900',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 0,
-    textAlign: 'center',
-    textShadowColor: 'rgba(255,255,255,1)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 10,
-    letterSpacing: 1.1,
-  },
-  foodieMessageText: {
-    color: '#f97316',
-    fontSize: 22,
-    fontWeight: '900',
-    fontFamily: 'DynaPuff',
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 0,
-    textShadowColor: 'rgba(255,255,255,0.95)',
-    textShadowOffset: { width: 0, height: 3 },
-    textShadowRadius: 8,
-    lineHeight: 30,
-    letterSpacing: 1.2,
-  },
-  welcomeMain: {
-    color: '#1e40af',
-    fontSize: 28,
-    fontWeight: '900',
-    fontFamily: 'Inter',
-    marginTop: 8,
-    marginBottom: 0,
-    textAlign: 'center',
-    textShadowColor: '#fff',
-    textShadowOffset: { width: 0, height: 5 },
-    textShadowRadius: 20,
-    letterSpacing: 1.1,
   },
   foodieShortMessage: {
     color: '#000',
@@ -389,25 +249,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontFamily: 'Inter',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: 6,
     marginBottom: 0,
     textShadowColor: '#fff',
     textShadowOffset: { width: 0, height: 4 },
     textShadowRadius: 16,
     letterSpacing: 1.1,
   },
-  whiteOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.65)',
-    zIndex: 1,
+  welcomeMain: {
+    color: '#1e40af',
+    fontSize: 32,
+    fontWeight: '900',
+    fontFamily: 'Inter',
+    marginBottom: 8,
+    letterSpacing: 1.5,
+    textAlign: 'center',
   },
-});
-
-
-
-// ...
-
+  buttonIcon: {
+    marginLeft: 12,
+  },
+}); 

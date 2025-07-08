@@ -1,17 +1,41 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, ActivityIndicator, Text } from 'react-native';
 import NavBar from '../../components/NavBar';
-// import AuthGuard from '../../components/AuthGuard';
+import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useRouter } from 'expo-router';
+import { useEffect, useState } from 'react';
 
 export default function TabLayout() {
+  const { isSignedIn, isLoaded } = useAuth();
+  const { user, isLoaded: userLoaded } = useUser();
+  const router = useRouter();
+  const [isChecking, setIsChecking] = useState(true);
+
+  useEffect(() => {
+    if (!isLoaded || !userLoaded) return;
+    if (isSignedIn && user?.publicMetadata?.role === 'admin') {
+      router.replace('/(admin)/notifications');
+      return;
+    }
+    setIsChecking(false);
+  }, [isSignedIn, isLoaded, user, userLoaded, router]);
+
+  if (!isLoaded || !userLoaded || isChecking) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#f97316" />
+        <Text style={{ marginTop: 16 }}>Verificando permisos...</Text>
+      </View>
+    );
+  }
+
   return (
-    // <AuthGuard requireAuth={false}>
-      <Tabs
-        tabBar={props => <NavBar {...props} />}
-        screenOptions={{
-          headerShown: false,
-        }}>
+    <Tabs
+      tabBar={props => <NavBar {...props} />}
+      screenOptions={{
+        headerShown: false,
+      }}>
       <Tabs.Screen
         name="home"
         options={{
@@ -72,8 +96,7 @@ export default function TabLayout() {
           href: null, // This hides the tab from the tab bar
         }}
       />
-          </Tabs>
-    // </AuthGuard>
+    </Tabs>
   );
 }
 

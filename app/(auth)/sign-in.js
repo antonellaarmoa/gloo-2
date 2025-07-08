@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet, ImageBackground, Dimensions, Image, Alert, Animated, StatusBar, Platform, KeyboardAvoidingView, ScrollView, Modal, ActivityIndicator } from 'react-native';
-import { useSignIn, useOAuth, useAuth } from '@clerk/clerk-expo';
-import { useRouter } from 'expo-router';
+import { useSignIn, useOAuth, useAuth, useUser } from '@clerk/clerk-expo';
+import { useRouter, usePathname } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { handleSignIn, handleOAuth, checkExistingSession } from '../../utils/clerkErrorHandler';
 
@@ -13,7 +13,9 @@ export default function SignInScreen() {
   const { signIn, setActive, isLoaded } = useSignIn();
   const { startOAuthFlow } = useOAuth({ strategy: 'oauth_google' });
   const { isSignedIn } = useAuth();
+  const { user, isLoaded: userLoaded } = useUser();
   const router = useRouter();
+  const pathname = usePathname();
   const [emailAddress, setEmailAddress] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -26,6 +28,7 @@ export default function SignInScreen() {
   const [forgotCode, setForgotCode] = useState('');
   const [forgotNewPassword, setForgotNewPassword] = useState('');
   const [forgotSuccess, setForgotSuccess] = useState(false);
+  const [pendingRedirect, setPendingRedirect] = useState(false);
 
   // Animations
   const fadeAnim = new Animated.Value(0);
@@ -53,26 +56,23 @@ export default function SignInScreen() {
     ]).start();
   }, []);
 
-  // AuthGuard handles the redirect logic, so we don't need this here
-
   const onSignInPress = async () => {
     if (!emailAddress || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
     if (!isLoaded) return;
-
-    // AuthGuard handles session checks
     setLoading(true);
-    
     const result = await handleSignIn(signIn, setActive, { emailAddress, password }, router);
-    
+    setLoading(false);
+    if (result.success) {
+      setTimeout(() => {
+        router.replace('/');
+      }, 500);
+    }
     if (!result.success && !result.redirected) {
       Alert.alert(result.error.title || 'Error', result.error.message);
     }
-    
-    setLoading(false);
   };
 
   const onGooglePress = async () => {
@@ -132,6 +132,17 @@ export default function SignInScreen() {
       setForgotLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (pendingRedirect && userLoaded && user) {
+      if (user?.publicMetadata?.role === 'admin') {
+        router.replace('/(admin)/notifications');
+      } else {
+        router.replace('/(tabs)/home');
+      }
+      setPendingRedirect(false);
+    }
+  }, [pendingRedirect, userLoaded, user, router]);
 
   return (
     <View style={{ flex: 1 }}>

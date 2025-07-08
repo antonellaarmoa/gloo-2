@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Text, TextInput, TouchableOpacity, View, StyleSheet, ImageBackground, Dimensions, Image, Alert, Animated, StatusBar, Platform, KeyboardAvoidingView, ScrollView } from 'react-native';
-import { useSignUp, useAuth } from '@clerk/clerk-expo';
-import { useRouter } from 'expo-router';
+import { useSignUp, useAuth, useUser } from '@clerk/clerk-expo';
+import { useRouter, usePathname } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import { handleSignUp, checkExistingSession } from '../../utils/clerkErrorHandler';
 
@@ -13,6 +13,8 @@ export default function SignUpScreen() {
   const { signUp, setActive, isLoaded } = useSignUp();
   const { isSignedIn } = useAuth();
   const router = useRouter();
+  const { user } = useUser();
+  const pathname = usePathname();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [emailAddress, setEmailAddress] = useState('');
@@ -45,7 +47,19 @@ export default function SignUpScreen() {
     ]).start();
   }, []);
 
-  // AuthGuard handles the redirect logic, so we don't need this here
+  useEffect(() => {
+    if (isSignedIn && isLoaded && user) {
+      if (user?.publicMetadata?.role === 'admin') {
+        if (!pathname.startsWith('/(admin)')) {
+          router.replace('/(admin)/notifications');
+        }
+      } else {
+        if (pathname !== '/home') {
+          router.replace('/home');
+        }
+      }
+    }
+  }, [isSignedIn, isLoaded, user, pathname]);
 
   const onSignUpPress = async () => {
     if (!firstName || !lastName || !emailAddress || !password) {
@@ -60,20 +74,16 @@ export default function SignUpScreen() {
 
     if (!isLoaded) return;
 
-    // AuthGuard handles session checks
     setLoading(true);
-    
     const result = await handleSignUp(signUp, setActive, { 
       firstName, 
       lastName, 
       emailAddress, 
       password 
     }, router);
-    
     if (!result.success && !result.redirected) {
       Alert.alert(result.error.title || 'Error', result.error.message);
     }
-    
     setLoading(false);
   };
 

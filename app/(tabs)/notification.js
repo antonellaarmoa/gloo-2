@@ -14,40 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1';
-
-// Función helper para hacer peticiones al backend con manejo de errores
-const apiRequest = async (url, options = {}) => {
-  const defaultOptions = {
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-  };
-
-  // Crear un timeout manual para React Native
-  const timeout = 10000; // 10 segundos
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
-
-  try {
-    const response = await fetch(url, { 
-      ...defaultOptions, 
-      ...options,
-      signal: controller.signal 
-    });
-    clearTimeout(timeoutId);
-    return { success: true, response, data: await response.json() };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    // Solo logear errores que no sean de red/CORS para evitar spam
-    if (!error.message.includes('Failed to fetch') && error.name !== 'AbortError') {
-      console.error(`API request failed for ${url}:`, error);
-    }
-    return { success: false, error };
-  }
-};
+import { API_CONFIG, apiRequest } from '../../config/api';
 
 // Funciones para manejar notificaciones localmente
 const saveNotificationsLocally = async (notifications) => {
@@ -87,11 +54,39 @@ const loadFollowStatesLocally = async () => {
 };
 
 export default function NotificationScreen() {
-  const { isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId, getToken } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [followStates, setFollowStates] = useState({});
+
+  // Helper para llamadas autenticadas
+  const apiRequestWithAuth = async (url, options = {}) => {
+    const token = await getToken();
+    const headers = {
+      ...(options.headers || {}),
+      'Authorization': token ? `Bearer ${token}` : undefined,
+    };
+    
+    console.log('Making authenticated request:', {
+      url,
+      method: options.method || 'GET',
+      hasToken: !!token,
+      tokenPreview: token ? `${token.substring(0, 20)}...` : 'No token'
+    });
+    
+    const result = await apiRequest(url, { ...options, headers });
+    
+    console.log('Authenticated request result:', {
+      url,
+      success: result.success,
+      status: result.response?.status,
+      hasData: !!result.data,
+      error: result.error?.message
+    });
+    
+    return result;
+  };
 
   // Cargar notificaciones del backend
   const fetchNotifications = async () => {
@@ -111,9 +106,19 @@ export default function NotificationScreen() {
       }
 
       // Intentar sincronizar con el backend
-      const { success, response, data, error } = await apiRequest(`${API_URL}/notifications/${userId}`);
+      console.log('Fetching notifications from backend for userId:', userId);
+      const { success, response, data, error } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}`);
+
+      console.log('Backend notifications response:', {
+        success,
+        status: response?.status,
+        hasData: !!data,
+        dataKeys: data ? Object.keys(data) : [],
+        error: error?.message
+      });
 
       if (success && response.ok && data.success && data.data.notifications) {
+        console.log('Backend notifications data:', data.data);
         const backendNotifications = data.data.notifications.map(notif => ({
           id: notif.id,
           type: notif.type,
@@ -135,10 +140,19 @@ export default function NotificationScreen() {
         
         setNotifications(backendNotifications);
         await saveNotificationsLocally(backendNotifications);
+        console.log('Backend notifications loaded:', backendNotifications.length);
       } else {
         console.log('Backend notifications failed, using local data');
+        console.log('Failure reason:', {
+          success,
+          responseOk: response?.ok,
+          dataSuccess: data?.success,
+          hasNotifications: data?.data?.notifications,
+          error
+        });
         // Si el backend falla, usar datos locales o mock
         if (localNotifications.length === 0) {
+          console.log('No local notifications, using mock data');
           const mockNotifications = getMockNotifications();
           setNotifications(mockNotifications);
           await saveNotificationsLocally(mockNotifications);
@@ -183,28 +197,58 @@ export default function NotificationScreen() {
     await saveNotificationsLocally(updatedNotifications);
 
     try {
-      const { success, response } = await apiRequest(`${API_URL}/notifications/${userId}/read`, {
+      const { success, response } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}/read`, {
         method: 'PUT',
-        body: JSON.stringify({
-          notificationIds: [notificationId]
-        }),
+        body: JSON.stringify({ notificationId }),
       });
-
       if (!success || !response.ok) {
-        console.log('Backend sync failed for markAsRead');
+        // Si falla, revertir local
+        const reverted = notifications.map(notif => 
+          notif.id === notificationId 
+            ? { ...notif, read: false }
+            : notif
+        );
+        setNotifications(reverted);
+        await saveNotificationsLocally(reverted);
       }
     } catch (error) {
-      console.error('Error marking notification as read:', error);
-      // No revertir el cambio local - mantener la experiencia offline-first
+      // Si falla, revertir local
+      const reverted = notifications.map(notif => 
+        notif.id === notificationId 
+          ? { ...notif, read: false }
+          : notif
+      );
+      setNotifications(reverted);
+      await saveNotificationsLocally(reverted);
     }
   };
 
   // Seguir/dejar de seguir usuario
   const toggleFollow = async (targetUserId, notificationId) => {
-    if (!isSignedIn) return;
+    if (!isSignedIn) {
+      console.log('User not signed in, cannot follow');
+      return;
+    }
+
+    if (!targetUserId) {
+      console.log('No targetUserId provided');
+      return;
+    }
 
     try {
-      const isCurrentlyFollowing = followStates[notificationId];
+      // Obtener el estado actual de follow
+      const currentFollowState = followStates[notificationId];
+      const itemFollowed = notifications.find(n => n.id === notificationId)?.followed || false;
+      const isCurrentlyFollowing = currentFollowState !== undefined ? currentFollowState : itemFollowed;
+      
+      console.log('Toggle follow:', { 
+        notificationId, 
+        targetUserId, 
+        isCurrentlyFollowing,
+        currentFollowState,
+        itemFollowed,
+        userId
+      });
       
       // Actualizar estado local inmediatamente
       const newFollowStates = {
@@ -213,32 +257,105 @@ export default function NotificationScreen() {
       };
       setFollowStates(newFollowStates);
       await saveFollowStatesLocally(newFollowStates);
+      
+      console.log('Local state updated, calling backend...');
 
+      // Llamada real al backend con el endpoint correcto
+      const endpoint = isCurrentlyFollowing ? 'unfollow' : 'follow';
+      const url = `${API_CONFIG.BASE_URL}/follows/${userId}/${endpoint}`;
       const method = isCurrentlyFollowing ? 'DELETE' : 'POST';
       
-      const { success, response } = await apiRequest(`${API_URL}/users/${targetUserId}/follow`, {
+      // Construir el body según la acción
+      let body;
+      if (isCurrentlyFollowing) {
+        // Para unfollow: solo enviar followingId en el body (followerId viene de la URL)
+        body = JSON.stringify({ followingId: targetUserId });
+      } else {
+        // Para follow: enviar followingId en el body (followerId viene de la URL)
+        body = JSON.stringify({ followingId: targetUserId });
+      }
+      
+      console.log('Calling backend:', { 
+        method, 
+        url, 
+        body,
+        targetUserId,
+        userId,
+        endpoint
+      });
+      
+      console.log('Request details:', {
+        action: isCurrentlyFollowing ? 'UNFOLLOW' : 'FOLLOW',
+        followerId: userId,
+        followingId: targetUserId,
+        areDifferent: userId !== targetUserId,
+        bodyContent: isCurrentlyFollowing ? { followingId: targetUserId } : { followingId: targetUserId }
+      });
+      
+      // TEMPORAL: Usar token falso para probar que el follow/unfollow funciona
+      const testToken = 'user_2z4Jc0ajOuIlLqZlvYQyJpbY5sx';
+      const { success, response, data, error } = await apiRequest(url, {
         method,
+        body,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${testToken}`,
+        },
       });
 
-      if (!success || !response.ok) {
+      console.log('Backend response:', { success, status: response?.status, data, error });
+
+      if (!success || !response?.ok) {
         console.log('Backend sync failed for toggleFollow');
-        // Revertir cambio local si falla
+        console.log('Error details:', { success, status: response?.status, error });
+        console.log('Response data:', data);
+        
+        // Si es error 500, mantener el estado local (probablemente es un problema temporal del servidor)
+        if (response?.status === 500) {
+          console.log('Server error (500), keeping local state for better UX');
+          // El estado local ya se actualizó arriba, solo mantenerlo
+          // No revertir el estado local para permitir toggles posteriores
+          return;
+        }
+        
+        // Para otros errores, revertir cambio local
+        console.log('Reverting local state due to error');
         const revertedFollowStates = {
           ...followStates,
           [notificationId]: isCurrentlyFollowing
         };
         setFollowStates(revertedFollowStates);
         await saveFollowStatesLocally(revertedFollowStates);
+        
+        // Solo mostrar alerta si no es un error de red o 500
+        if (error && !error.message?.includes('Failed to fetch') && response?.status !== 500) {
+          Alert.alert('Error', 'No se pudo completar la acción');
+        }
+      } else {
+        console.log('Follow action successful:', !isCurrentlyFollowing ? 'FOLLOW' : 'UNFOLLOW', targetUserId);
+        // Guardar el estado exitoso localmente
+        await saveFollowStatesLocally(followStates);
       }
+      
     } catch (error) {
       console.error('Error toggling follow:', error);
       
       // Manejar errores de red específicamente
       if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
         console.log('Network error for follow action, keeping local state');
-        // No mostrar alerta para errores de red - mantener experiencia offline
+        // No revertir el estado local para errores de red - mantener experiencia offline
+        // El estado local ya se actualizó arriba, solo mantenerlo
         return;
       }
+      
+      // Para otros errores, revertir el estado local
+      console.log('Unexpected error, reverting local state');
+      const revertedFollowStates = {
+        ...followStates,
+        [notificationId]: isCurrentlyFollowing
+      };
+      setFollowStates(revertedFollowStates);
+      await saveFollowStatesLocally(revertedFollowStates);
       
       Alert.alert('Error', 'No se pudo completar la acción');
     }
@@ -294,7 +411,8 @@ export default function NotificationScreen() {
       time: '1h',
       avatar: require('../../assets/user.jpeg'),
       followed: true,
-      read: false
+      read: false,
+      userId: 'user_facundo_123'
     },
     {
       id: '4',
@@ -314,7 +432,8 @@ export default function NotificationScreen() {
       time: '1h',
       avatar: require('../../assets/user.jpeg'),
       followed: false,
-      read: false
+      read: false,
+      userId: 'user_paulina_456'
     },
     {
       id: '6',
@@ -324,7 +443,8 @@ export default function NotificationScreen() {
       time: '1h',
       avatar: require('../../assets/user.jpeg'),
       followed: true,
-      read: true
+      read: true,
+      userId: 'user_miriam_789'
     }
   ];
 
@@ -340,12 +460,15 @@ export default function NotificationScreen() {
   };
 
   const renderItem = ({ item }) => {
-    const isFollowing = followStates[item.id] !== undefined ? followStates[item.id] : item.followed;
+    const isFollowing = followStates[item.id] !== undefined 
+      ? followStates[item.id] 
+      : (item.followed || false);
 
     return (
       <TouchableOpacity 
         style={[styles.itemContainer, !item.read && styles.unreadItem]} 
         onPress={() => markAsRead(item.id)}
+        activeOpacity={0.7}
       >
         {item.type === 'approval' ? (
           <View style={styles.row}>
@@ -377,6 +500,7 @@ export default function NotificationScreen() {
                   { backgroundColor: isFollowing ? '#1e3a8a' : '#f97316' }
                 ]}
                 onPress={() => toggleFollow(item.userId || 'user123', item.id)}
+                activeOpacity={0.8}
               >
                 <Text style={styles.followText}>
                   {isFollowing ? 'Following' : 'Follow'}

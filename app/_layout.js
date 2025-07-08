@@ -1,20 +1,23 @@
-import { Slot } from 'expo-router';
+import { Slot, usePathname, useRouter } from 'expo-router';
 import * as Font from 'expo-font';
 import { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { NotificationProvider } from '../context/NotificationContext';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ClerkProvider } from '@clerk/clerk-expo';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
-const CLERK_PUBLISHABLE_KEY = 'pk_test_Y29taWMtbGVtbWluZy0xMi5jbGVyay5hY2NvdW50cy5kZXYk';
+import { ClerkProvider, useUser, useAuth } from '@clerk/clerk-expo';
 
 const queryClient = new QueryClient();
 
-export default function RootLayout() {
+function RootLayoutWithRedirect() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
   const [fontError, setFontError] = useState(null);
+  const [isReady, setIsReady] = useState(false);
+  const { user, isLoaded: userLoaded } = useUser();
+  const { isSignedIn } = useAuth();
+  const pathname = usePathname();
+  const router = useRouter();
 
   useEffect(() => {
     let isMounted = true;
@@ -34,6 +37,29 @@ export default function RootLayout() {
     };
   }, []);
 
+  useEffect(() => {
+    if (fontsLoaded && userLoaded) {
+      setIsReady(true);
+    }
+  }, [fontsLoaded, userLoaded]);
+
+  useEffect(() => {
+    if (!isReady || !fontsLoaded || !userLoaded) return;
+    
+    // Agregar un pequeño delay para asegurar que todo esté listo
+    const timer = setTimeout(() => {
+      if (pathname === '/' && isSignedIn) {
+        if (user && user.publicMetadata?.role === 'admin') {
+          router.replace('/(admin)/(tabs)/notifications');
+        } else {
+          router.replace('/(tabs)/home');
+        }
+      }
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [isReady, fontsLoaded, userLoaded, user, pathname, router, isSignedIn]);
+
   if (fontError) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
@@ -43,25 +69,30 @@ export default function RootLayout() {
     );
   }
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded || !userLoaded || !isReady || (pathname === '/' && isSignedIn)) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <Text>Cargando fuentes...</Text>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#f97316" />
+        <Text style={{ marginTop: 16 }}>Cargando...</Text>
       </View>
     );
   }
 
+  return <Slot />;
+}
+
+export default function RootLayout() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey="pk_test_Y29taWMtbGVtbWluZy0xMi5jbGVyay5hY2NvdW50cy5kZXYk">
+      <QueryClientProvider client={queryClient}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <SafeAreaProvider>
             <NotificationProvider>
-              <Slot />
+              <RootLayoutWithRedirect />
             </NotificationProvider>
           </SafeAreaProvider>
         </GestureHandlerRootView>
-      </ClerkProvider>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
   );
 }
