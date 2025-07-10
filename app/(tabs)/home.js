@@ -250,11 +250,21 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
   // Verificar si el usuario ya dio like
   const liked = userLikes[item.id] || false;
   
-  // Verificar si la receta está guardada
-  const isSaved = savedRecipes[item.id] || false;
-  
-  // Verificar si sigue al usuario
-  const isFollowing = followedUsers[item.userId] || followedUsers[item.user?.id] || false;
+  // Verificar si la receta está guardada (robusto y con logs)
+  const recipeIdStr = String(item.id);
+  const savedRecipeKeys = Object.keys(savedRecipes);
+  const isSaved = !!savedRecipes[recipeIdStr];
+  if (__DEV__) {
+    console.log('[DEBUG][Save] recipeId:', recipeIdStr, '| savedRecipeKeys:', savedRecipeKeys, '| isSaved:', isSaved);
+  }
+
+  // Verificar si sigue al usuario (robusto y con logs)
+  const recipeUserId = String(item.userId || item.user?.id || item.authorId || '');
+  const followedUserKeys = Object.keys(followedUsers);
+  const isFollowing = followedUserKeys.includes(recipeUserId);
+  if (__DEV__) {
+    console.log('[DEBUG][Follow] Recipe:', item.title, '| recipeUserId:', recipeUserId, '| followedUserKeys:', followedUserKeys, '| isFollowing:', isFollowing);
+  }
 
   // Obtener información del usuario con fallbacks
   const userInfo = {
@@ -670,15 +680,17 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
       return;
     }
     
-    const targetUserId = item.userId || item.user?.id;
-    if (!targetUserId) return;
+    if (!recipeUserId) return;
     
-    console.log('Toggle follow:', { targetUserId, currentUserId: userId, isFollowing });
+    console.log('Toggle follow:', { recipeUserId, currentUserId: userId, isFollowing });
     
-    // Actualizar estado local inmediatamente
-    onFollowToggle(targetUserId, !isFollowing);
+    // Guardar el estado anterior para poder revertir si falla
+    const previousState = isFollowing;
     
-    // Intentar sincronizar con backend (sin revertir si falla)
+    // Optimismo local: actualizar estado inmediatamente
+    onFollowToggle(recipeUserId, !isFollowing);
+    
+    // Intentar sincronizar con backend
     if (userId) {
       try {
         const method = isFollowing ? 'DELETE' : 'POST';
@@ -688,18 +700,24 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ followingId: targetUserId }),
+          body: JSON.stringify({ followingId: recipeUserId }),
         });
         
         console.log('Follow response status:', response.status);
         
         if (!response.ok) {
-          console.log('Backend sync failed, but keeping local state for better UX');
-          // No revertir el estado - mantener la experiencia del usuario
+          console.log('Backend sync failed, reverting local state');
+          // Revertir el estado local si falla
+          onFollowToggle(recipeUserId, previousState);
+          Alert.alert('Error', 'No se pudo actualizar el seguimiento. Inténtalo de nuevo.');
+        } else {
+          console.log('Follow/Unfollow successful');
         }
       } catch (error) {
         console.error('Error toggling follow:', error);
-        // No revertir el estado - mantener la experiencia del usuario
+        // Revertir el estado local si hay error de red
+        onFollowToggle(recipeUserId, previousState);
+        Alert.alert('Error de conexión', 'No se pudo actualizar el seguimiento. Verifica tu conexión.');
       }
     }
   };
@@ -976,7 +994,10 @@ export default function HomeScreen() {
           }
           
           const followed = await loadFollowedUsersLocally();
-          if (isMounted) setFollowedUsers(followed);
+          if (isMounted) {
+            console.log('Loaded followed users from local storage:', Object.keys(followed).length, 'users:', Object.keys(followed));
+            setFollowedUsers(followed);
+          }
         } catch (error) {
           console.error('Error loading data:', error);
         }
@@ -1053,22 +1074,36 @@ export default function HomeScreen() {
     if (!userId) return [];
     
     try {
-      const response = await fetch(`${API_BASE_URL}/recipes/following/${userId}`, {
+      // 1. Obtener usuarios que sigue el usuario actual
+      const followingResponse = await fetch(`${API_BASE_URL}/follows/${userId}/following`, {
         method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        return data.data || [];
-      } else {
-        console.log('Error fetching following recipes:', response.status);
-        return [];
-      }
+      
+      if (!followingResponse.ok) return [];
+      
+      const followingData = await followingResponse.json();
+      const followingUsers = (followingData.data && followingData.data.following) ? followingData.data.following : [];
+      
+      if (!Array.isArray(followingUsers) || followingUsers.length === 0) return [];
+      
+      const followedUserIds = followingUsers.map(user => user.followingId || user.id);
+      
+      // 2. Obtener todas las recetas
+      const recipesResponse = await fetch(`${API_BASE_URL}/recipes`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      
+      if (!recipesResponse.ok) return [];
+      
+      const recipesData = await recipesResponse.json();
+      const allRecipes = recipesData.data || [];
+      
+      // 3. Filtrar recetas de usuarios seguidos
+      return allRecipes.filter(recipe => followedUserIds.includes(recipe.userId));
     } catch (error) {
-      console.log('Error fetching following recipes:', error);
+      console.error('Error fetching following recipes:', error);
       return [];
     }
   };
@@ -1078,10 +1113,12 @@ export default function HomeScreen() {
     let isMounted = true;
     
     const loadFollowing = async () => {
-      if (activeTab === 'Following' && followingRecipes.length === 0 && isMounted) {
+      if (activeTab === 'Following' && userId && isMounted) {
+        console.log('Loading following recipes for tab change...');
         try {
           const recipes = await fetchFollowingRecipes();
           if (isMounted) {
+            console.log('Setting following recipes:', recipes.length);
             setFollowingRecipes(recipes);
           }
         } catch (error) {
@@ -1095,17 +1132,19 @@ export default function HomeScreen() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, followingRecipes.length, userId]);
+  }, [activeTab, userId]);
 
   // Recargar recetas de following cuando se cambia a tab Following
   React.useEffect(() => {
     if (activeTab === 'Following' && userId) {
+      console.log('Reloading following recipes...');
       const loadFollowing = async () => {
         try {
           const recipes = await fetchFollowingRecipes();
+          console.log('Reloaded following recipes:', recipes.length);
           setFollowingRecipes(recipes);
         } catch (error) {
-          console.error('Error loading following recipes:', error);
+          console.error('Error reloading following recipes:', error);
         }
       };
       
@@ -1190,22 +1229,45 @@ export default function HomeScreen() {
     }
   };
 
+  // Función para manejar cambios de follow con optimismo local
+  const handleFollowToggle = async (userIdToToggle, isFollowing) => {
+    // Actualizar estado local inmediatamente
+    setFollowedUsers(prev => ({
+      ...prev,
+      [userIdToToggle]: isFollowing
+    }));
+    
+    // Guardar en almacenamiento local
+    try {
+      const newFollowedUsers = { ...followedUsers, [userIdToToggle]: isFollowing };
+      await saveFollowedUsersLocally(newFollowedUsers);
+      console.log('Follow state saved locally:', userIdToToggle, isFollowing);
+    } catch (error) {
+      console.error('Error saving follow state locally:', error);
+    }
+  };
+
   // Sincronizar seguidos con backend
   const syncFollowedUsersWithBackend = async () => {
     if (!userId) return;
     try {
-      const res = await fetch(`https://gloo-api-production.up.railway.app/api/v1/follows/${userId}/following`);
+      const res = await fetch(`${API_BASE_URL}/follows/${userId}/following`);
       if (res.ok) {
         const data = await res.json();
-        const followingArr = Array.isArray(data.data?.following) ? data.data.following : [];
+        const followingArr = (data.data && data.data.following) ? data.data.following : [];
         const newFollowed = {};
         followingArr.forEach(u => {
-          if (u.followingId) newFollowed[u.followingId] = true;
+          const followingId = String(u.followingId || u.id || '');
+          if (followingId) newFollowed[followingId] = true;
         });
         setFollowedUsers(newFollowed);
         await saveFollowedUsersLocally(newFollowed);
+        console.log('Synced followed users from backend:', Object.keys(newFollowed).length, 'users:', Object.keys(newFollowed));
+      } else {
+        console.log('Error syncing followed users:', res.status);
       }
     } catch (e) {
+      console.log('Error syncing followed users:', e);
       // Si falla, no sobreescribir el estado local
     }
   };
@@ -1255,13 +1317,16 @@ export default function HomeScreen() {
   // Determinar qué datos mostrar según el tab activo
   let visibleData = data;
   if (activeTab === 'Following') {
-    visibleData = followingRecipes.length > 0 ? followingRecipes : [];
+    console.log('Following tab active, using followingRecipes:', followingRecipes.length);
+    visibleData = followingRecipes;
+  } else {
+    console.log('For You tab active, using all recipes:', data?.length);
   }
   
   console.log('Data source:', { 
     activeTab, 
     dataLength: data?.length, 
-    trendingLength: trendingRecipes?.length,
+    followingRecipesLength: followingRecipes?.length,
     visibleLength: visibleData?.length 
   });
   
@@ -1482,7 +1547,7 @@ export default function HomeScreen() {
               savedRecipes={savedRecipes}
               onSaveToggle={handleSaveToggle}
               followedUsers={followedUsers}
-              onFollowToggle={setFollowedUsers}
+              onFollowToggle={handleFollowToggle}
             />
           )}
           pagingEnabled
@@ -1517,7 +1582,7 @@ export default function HomeScreen() {
               style={{ backgroundColor: '#F9690E', borderRadius: 50, paddingVertical: 12, paddingHorizontal: 32, marginBottom: 12 }}
               onPress={() => {
                 setShowGuestModal(false);
-                router.replace('/(auth)/sign-in');
+                router.push('/(auth)/sign-in');
               }}
             >
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign In / Create Account</Text>

@@ -20,7 +20,7 @@ export default function MenuModal({ visible, onClose }) {
     setShowLogout(false);
     try {
       await signOut();
-      router.replace('/(auth)/sign-in');
+      router.push('/(auth)/sign-in');
     } catch (error) {
       console.error('Error signing out:', error);
     }

@@ -115,7 +115,7 @@ export default function NavBar({ state, descriptors, navigation }) {
             </Text>
             <TouchableOpacity
               style={{ backgroundColor: '#142E8B', borderRadius: 50, paddingVertical: 12, paddingHorizontal: 32, marginBottom: 12 }}
-              onPress={() => router.replace('/(auth)/sign-in')}
+              onPress={() => router.push('/(auth)/sign-in')}
             >
               <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>Sign In / Create Account</Text>
             </TouchableOpacity>
