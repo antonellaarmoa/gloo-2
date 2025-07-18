@@ -17,9 +17,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG, apiRequest } from '../../config/api';
 
 // Funciones para manejar notificaciones localmente
+const cleanNotifications = (notifs) =>
+  notifs.map(n => ({ ...n, read: n.read === true || n.read === 'true' || n.read === 1 || n.read === 1n }));
+
 const saveNotificationsLocally = async (notifications) => {
   try {
-    await AsyncStorage.setItem('@gloo:notifications', JSON.stringify(notifications));
+    // Siempre guardar con read booleano
+    const cleaned = cleanNotifications(notifications);
+    await AsyncStorage.setItem('@gloo:notifications', JSON.stringify(cleaned));
   } catch (error) {
     console.log('Error saving notifications locally:', error);
   }
@@ -28,7 +33,9 @@ const saveNotificationsLocally = async (notifications) => {
 const loadNotificationsLocally = async () => {
   try {
     const savedNotifications = await AsyncStorage.getItem('@gloo:notifications');
-    return savedNotifications ? JSON.parse(savedNotifications) : [];
+    const parsed = savedNotifications ? JSON.parse(savedNotifications) : [];
+    // Siempre limpiar al cargar
+    return cleanNotifications(parsed);
   } catch (error) {
     console.log('Error loading notifications locally:', error);
     return [];
@@ -117,7 +124,7 @@ export default function NotificationScreen() {
           title: notif.title || '',
           message: notif.message,
           time: formatTimeAgo(notif.createdAt),
-          read: notif.read,
+          read: notif.read === true || notif.read === 'true' || notif.read === 1 || notif.read === 1n, // robusto
           sender: notif.sender,
           relatedId: notif.relatedId,
           relatedType: notif.relatedType,
@@ -166,25 +173,26 @@ export default function NotificationScreen() {
     const updatedNotifications = notifications.map(notif => 
       notif.id === notificationId 
         ? { ...notif, read: true }
-        : notif
+        : { ...notif, read: notif.read === true || notif.read === 'true' || notif.read === 1 || notif.read === 1n }
     );
     setNotifications(updatedNotifications);
     await saveNotificationsLocally(updatedNotifications);
 
     try {
       const notificationIdsArr = [Number(notificationId)];
-      const { success, response, data } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}/read`, {
+      const url = `${API_CONFIG.BASE_URL}/notifications/${userId}/read`;
+      const headers = { 'Content-Type': 'application/json' };
+      const { success, response, data } = await apiRequestWithAuth(url, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ notificationIds: notificationIdsArr }),
       });
-      console.log('Respuesta al marcar como leída:', { success, status: response?.status, data });
       if (!success || !response.ok) {
         // Si falla, revertir local
         const reverted = notifications.map(notif => 
           notif.id === notificationId 
             ? { ...notif, read: false }
-            : notif
+            : { ...notif, read: notif.read === true || notif.read === 'true' || notif.read === 1 || notif.read === 1n }
         );
         setNotifications(reverted);
         await saveNotificationsLocally(reverted);
@@ -192,13 +200,12 @@ export default function NotificationScreen() {
         // Si el backend responde bien, refresca la lista desde el backend
         fetchNotifications();
       }
-      console.log('Estado de notificaciones tras marcar como leída:', notifications);
     } catch (error) {
       // Si falla, revertir local
       const reverted = notifications.map(notif => 
         notif.id === notificationId 
           ? { ...notif, read: false }
-          : notif
+          : { ...notif, read: notif.read === true || notif.read === 'true' || notif.read === 1 || notif.read === 1n }
       );
       setNotifications(reverted);
       await saveNotificationsLocally(reverted);
@@ -444,10 +451,15 @@ export default function NotificationScreen() {
   // Mostrar todas las notificaciones locales, sin filtrar por tipo
   const filteredNotifications = notifications;
 
-  // En el renderItem, mostrar badge de color y acceso a la receta
+  // En el renderItem, mejorar la diferenciación visual
   const renderItem = ({ item }) => (
     <TouchableOpacity
-      style={[styles.notificationCard, { backgroundColor: item.read ? '#f3f4f6' : '#fff' }]}
+      style={[
+        styles.notificationCard,
+        item.read
+          ? styles.notificationRead
+          : styles.notificationUnread
+      ]}
       onPress={() => {
         if (item.relatedType === 'recipe' && item.relatedId) {
           // Navegar a la receta relacionada
@@ -455,8 +467,10 @@ export default function NotificationScreen() {
         }
         markAsRead(item.id);
       }}
+      activeOpacity={0.88}
     >
       <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {/* Badge de color por tipo */}
         <View style={[
           styles.badge,
           { backgroundColor:
@@ -468,13 +482,17 @@ export default function NotificationScreen() {
             '#9ca3af'
           }
         ]}/>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.message}>{item.message}</Text>
-          <Text style={styles.time}>{item.time}</Text>
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={styles.notificationTitle}>{item.title}</Text>
+          <Text style={styles.notificationMessage}>{item.message}</Text>
+          <Text style={styles.notificationTime}>{item.time}</Text>
         </View>
         {item.relatedType === 'recipe' && (
           <Ionicons name="fast-food-outline" size={22} color="#f97316" style={{ marginLeft: 8 }} />
+        )}
+        {/* Punto azul para no leídas */}
+        {!item.read && (
+          <View style={styles.unreadDot} />
         )}
       </View>
     </TouchableOpacity>
@@ -516,54 +534,7 @@ export default function NotificationScreen() {
       <FlatList
         data={filteredNotifications}
         keyExtractor={item => item.id?.toString()}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.notificationCard,
-              { backgroundColor: item.read ? '#f3f4f6' : '#fff',
-                borderColor: item.read ? '#e5e7eb' : '#fbbf24',
-                borderWidth: item.read ? 1 : 2,
-                shadowOpacity: item.read ? 0.05 : 0.13,
-                elevation: item.read ? 1 : 4,
-              }
-            ]}
-            onPress={() => {
-              if (item.relatedType === 'recipe' && item.relatedId) {
-                // Navegar a la receta relacionada
-                // navigation.navigate('recipe', { id: item.relatedId });
-              }
-              markAsRead(item.id);
-            }}
-            activeOpacity={0.88}
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              {/* Avatar o logo */}
-              {item.avatar ? (
-                <Image source={item.avatar} style={styles.avatarLarge} />
-              ) : (
-                <View style={[styles.avatarLarge, { backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center' }]}> 
-                  <Ionicons name="notifications-outline" size={32} color="#E2773C" />
-                </View>
-              )}
-              <View style={{ flex: 1, marginLeft: 14 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
-                  <Text style={styles.titleBold}>{item.title}</Text>
-                  {/* Badge de tipo */}
-                  <View style={[
-                    styles.badgeLarge,
-                    { backgroundColor: item.type === 'recipe_pending' ? '#f59e42' : item.type === 'recipe_delete_pending' ? '#ef4444' : item.type === 'recipe_approved' ? '#22c55e' : item.type === 'recipe_rejected' ? '#ef4444' : '#9ca3af',
-                      marginLeft: 8 }
-                  ]} />
-                  {item.relatedType === 'recipe' && (
-                    <Ionicons name="fast-food-outline" size={20} color="#f97316" style={{ marginLeft: 6 }} />
-                  )}
-                </View>
-                <Text style={styles.messageBig}>{item.message}</Text>
-                <Text style={styles.timeSmall}>{item.time}</Text>
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
+        renderItem={renderItem}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
         refreshControl={
@@ -722,13 +693,41 @@ const styles = StyleSheet.create({
   },
   notificationCard: {
     borderRadius: 14,
+    marginBottom: 16,
     padding: 16,
-    marginBottom: 12,
+    flexDirection: 'column',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
+    shadowRadius: 8,
     elevation: 2,
+  },
+  notificationUnread: {
+    backgroundColor: '#fff',
+    borderColor: '#fbbf24',
+    borderWidth: 2,
+    shadowOpacity: 0.13,
+  },
+  notificationRead: {
+    backgroundColor: '#f3f4f6',
+    borderColor: '#e5e7eb',
+    borderWidth: 1,
+    shadowOpacity: 0.05,
+  },
+  textUnread: {
+    color: '#222',
+    fontWeight: 'bold',
+  },
+  textRead: {
+    color: '#888',
+    fontWeight: 'normal',
+  },
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2563eb', // azul
+    marginLeft: 10,
+    alignSelf: 'center',
   },
   badge: {
     width: 14,
@@ -777,5 +776,23 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     fontFamily: 'Inter',
     marginTop: 2,
+  },
+  notificationTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    color: '#18181b', // más oscuro para destacar
+    marginBottom: 2,
+  },
+  notificationMessage: {
+    fontSize: 15,
+    color: '#444',
+    marginBottom: 2,
+    fontWeight: '400', // peso normal
+  },
+  notificationTime: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+    fontWeight: '400', // peso normal
   },
 });

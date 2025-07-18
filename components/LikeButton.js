@@ -14,7 +14,7 @@ export default function LikeButton({
   showCount = true,
   onLikeChange,
 }) {
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(initialCount);
   const [loading, setLoading] = useState(false);
@@ -27,7 +27,13 @@ export default function LikeButton({
 
   const checkLikeStatus = async () => {
     try {
-      const response = await fetch(`${LIKES_API_URL}/${userId}/status/${recipeId}`);
+      const token = await getToken();
+      const response = await fetch(`${LIKES_API_URL}/${userId}/status/${recipeId}`, {
+        headers: {
+          'Authorization': token ? `Bearer ${token}` : undefined,
+          'Content-Type': 'application/json',
+        },
+      });
       const data = await response.json();
       
       if (data.success) {
@@ -43,10 +49,12 @@ export default function LikeButton({
 
     setLoading(true);
     try {
+      const token = await getToken();
       const response = await fetch(`${LIKES_API_URL}/${userId}/${liked ? 'unlike' : 'like'}`, {
         method: liked ? 'DELETE' : 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : undefined,
         },
         body: JSON.stringify({
           recipeId: parseInt(recipeId),
