@@ -7,14 +7,14 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection, isRecipeFavorite, forceSyncFavorites, repairFavorites } from '../../utils/favoritesManager';
-import { API_URLS } from '../../config/api';
+import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
 import SaveRecipeModal from '../../components/SaveRecipeModal';
 import LikeButton from '../../components/LikeButton';
 
 const { height, width } = Dimensions.get('window');
 
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1/recipes';
-const API_BASE_URL = 'https://gloo-api-production.up.railway.app/api/v1';
+const API_URL = `${API_CONFIG.BASE_URL}/recipes`;
+const API_BASE_URL = API_CONFIG.BASE_URL;
 
 // Función robusta para hacer peticiones a la API
 const makeApiRequest = async (url, options = {}) => {
@@ -126,7 +126,7 @@ const toggleLikeBackend = async (recipeId, userId, isLiked) => {
   try {
     const method = isLiked ? 'DELETE' : 'POST';
     const endpoint = isLiked ? 'unlike' : 'like';
-    const response = await fetch(`https://gloo-api-production.up.railway.app/api/v1/likes/${userId}/${endpoint}`, {
+    const response = await fetch(`${API_BASE_URL}/likes/${userId}/${endpoint}`, {
       method,
       headers: {
         'Content-Type': 'application/json',

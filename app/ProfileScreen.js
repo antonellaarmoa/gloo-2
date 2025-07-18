@@ -17,7 +17,7 @@ import {
   ToastAndroid,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import RecipeCard from '../components/RecipeCard';
 import MenuModal from '../components/MenuModal';
@@ -65,7 +65,8 @@ const makeApiRequest = async (url, options = {}) => {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { userId, user, isSignedIn, getToken } = useAuth();
+  const { userId, isSignedIn, getToken } = useAuth();
+  const { user, isLoaded: userLoaded } = useUser();
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
@@ -86,6 +87,9 @@ export default function ProfileScreen() {
   const [newCollectionName, setNewCollectionName] = useState('');
   const [newCollectionIcon, setNewCollectionIcon] = useState('folder');
   const [changedRecipes, setChangedRecipes] = useState([]);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [recipeToDelete, setRecipeToDelete] = useState(null);
+  const [fetchError, setFetchError] = useState(null);
 
   // Helpers para colecciones custom locales
   const getCollectionsKey = (userId) => `@gloo:collections:${userId}`;
@@ -108,22 +112,41 @@ export default function ProfileScreen() {
   const fetchProfileData = async () => {
     if (!isSignedIn || !userId) return;
     setLoading(true);
+    setFetchError(null);
     let backendUser = null;
     let debugInfo = { userId, url: API_URLS.USERS.BY_ID(userId), response: null, error: null };
     try {
-      // 1. Get user profile from backend
-      const userRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId));
+      // Obtener token de Clerk
+      const token = await getToken();
+      const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+      // 1. Get user profile from backend (con token)
+      const userRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId), { headers: { ...authHeaders } });
       debugInfo.response = userRes;
-      if (userRes.success && userRes.data && userRes.data.data) {
+      // Fallback robusto: si el backend responde mal, usar cualquier dato que venga en data
+      if (userRes.data && userRes.data.data) {
         backendUser = userRes.data.data;
+      } else if (userRes.data && typeof userRes.data === 'object' && Object.keys(userRes.data).length > 0) {
+        backendUser = userRes.data;
       } else if (userRes.success && userRes.data) {
         backendUser = userRes.data;
       } else {
         backendUser = null;
       }
-      // 2. If user does not exist in backend, create it using Clerk data
+      // Si el backend no da datos válidos, usar Clerk
       if (!backendUser && user) {
-        const createRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId), {
+        backendUser = {
+          id: user.id,
+          username: user.username,
+          email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress || '',
+          imageUrl: user.imageUrl,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          description: user.publicMetadata?.bio || '',
+        };
+      }
+      // 2. Si user no existe en backend, crear usando Clerk
+      if (!userRes.success && user) {
+        await makeApiRequest(API_URLS.USERS.BY_ID(userId), {
           method: 'PUT',
           body: JSON.stringify({
             firstName: user.firstName || '',
@@ -131,42 +154,37 @@ export default function ProfileScreen() {
             username: user.username || '',
             description: user.publicMetadata?.bio || '',
           }),
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
         });
-        debugInfo.createRes = createRes;
-        // Re-fetch after creation
-        const userRes2 = await makeApiRequest(API_URLS.USERS.BY_ID(userId));
-        debugInfo.response2 = userRes2;
-        if (userRes2.success && userRes2.data && userRes2.data.data) {
-          backendUser = userRes2.data.data;
-        } else if (userRes2.success && userRes2.data) {
-          backendUser = userRes2.data;
-        } else {
-          backendUser = null;
-        }
       }
       setFetchDebug(debugInfo);
       // 3. Get stats
-      const statsRes = await makeApiRequest(API_URLS.USERS.STATS(userId));
+      const statsRes = await makeApiRequest(API_URLS.USERS.STATS(userId), { headers: { ...authHeaders } });
       // 4. Get user recipes
-      const recipesRes = await makeApiRequest(API_URLS.RECIPES.BY_USER(userId));
+      const recipesRes = await makeApiRequest(API_URLS.RECIPES.BY_USER(userId), { headers: { ...authHeaders } });
+      // Mapeo robusto: acepta data.data o data, aunque la respuesta sea error
+      let recetas = [];
+      if (recipesRes.data && Array.isArray(recipesRes.data.data)) {
+        recetas = recipesRes.data.data;
+      } else if (recipesRes.data && Array.isArray(recipesRes.data)) {
+        recetas = recipesRes.data;
+      } else if (recipesRes.data && typeof recipesRes.data === 'object' && Object.keys(recipesRes.data).length > 0) {
+        recetas = [recipesRes.data];
+      }
+      setUserRecipes(Array.isArray(recetas) ? recetas : []);
       // 5. Get all collections (backend, metadatos)
-      const collectionsRes = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId));
-      console.log('DEBUG collectionsRes:', collectionsRes);
+      const collectionsRes = await makeApiRequest(API_URLS.COLLECTIONS.BY_USER(userId), { headers: { ...authHeaders } });
       let backendCollections = [];
       let favoritos = [];
-      if (collectionsRes.success && Array.isArray(collectionsRes.data?.data)) {
+      if (collectionsRes.data && Array.isArray(collectionsRes.data.data) && collectionsRes.data.data.length > 0) {
         backendCollections = collectionsRes.data.data;
         // Fetch recipes for each collection
         const collectionsWithRecipes = await Promise.all(
           backendCollections.map(async (col) => {
             const colUrl = `${API_URLS.COLLECTIONS.BY_USER(userId)}/${col.id}`;
-            console.log('DEBUG fetching collection recipes:', colUrl);
-            const colRes = await makeApiRequest(colUrl);
-            console.log('DEBUG colRes:', colRes);
+            const colRes = await makeApiRequest(colUrl, { headers: { ...authHeaders } });
             let recipes = [];
             if (
-              colRes.success &&
               colRes.data &&
               colRes.data.data &&
               Array.isArray(colRes.data.data.recipes)
@@ -180,30 +198,33 @@ export default function ProfileScreen() {
         // Favoritos
         const favCol = backendCollections.find(col => col.name === 'Favoritos' || col.isDefault);
         favoritos = favCol && favCol.recipes ? favCol.recipes : [];
-        console.log('DEBUG backendCollections:', backendCollections);
-        console.log('DEBUG favoritos:', favoritos);
-        
-        // También cargar favoritos locales como respaldo
+        setUserCollections(backendCollections);
+        setFavoriteRecipes(favoritos);
+      } else if (collectionsRes.data && Array.isArray(collectionsRes.data)) {
+        backendCollections = collectionsRes.data;
+        setUserCollections(backendCollections);
+      } else if (collectionsRes.data && typeof collectionsRes.data === 'object' && Object.keys(collectionsRes.data).length > 0) {
+        backendCollections = [collectionsRes.data];
+        setUserCollections(backendCollections);
+      } else {
+        // Si el backend falla o está vacío, usa los locales
         try {
           const { getFavorites } = require('../utils/favoritesManager');
           const localFavorites = await getFavorites(userId);
-          console.log('DEBUG localFavorites:', localFavorites);
-          
-          // Si no hay favoritos en backend pero sí en local, usar los locales
-          if (favoritos.length === 0 && localFavorites.length > 0) {
-            favoritos = localFavorites;
-            console.log('Using local favorites as fallback');
-          }
+          const localCollections = await getCustomCollections(userId);
+          setUserCollections(localCollections);
+          setFavoriteRecipes(localFavorites);
         } catch (error) {
-          console.error('Error loading local favorites:', error);
+          setUserCollections([]);
+          setFavoriteRecipes([]);
         }
       }
       // 6. Followers/Following
-      const followersRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWERS(userId));
-      const followingRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWING(userId));
+      const followersRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWERS(userId), { headers: { ...authHeaders } });
+      const followingRes = await makeApiRequest(API_URLS.FOLLOWS.FOLLOWING(userId), { headers: { ...authHeaders } });
       // 7. Custom collections (local)
       const customCollections = await getCustomCollections(userId);
-      setUserData(backendUser);
+      setUserData(backendUser); // SIEMPRE setea algo, aunque sea Clerk
       setUserStats(
         statsRes.success && statsRes.data && statsRes.data.data
           ? statsRes.data.data
@@ -211,29 +232,28 @@ export default function ProfileScreen() {
             ? statsRes.data
             : { recipes: 0, followers: 0, following: 0 }
       );
-      setUserRecipes(
-        recipesRes.success && recipesRes.data && Array.isArray(recipesRes.data)
-          ? recipesRes.data
-          : recipesRes.success && recipesRes.data && Array.isArray(recipesRes.data.data)
-            ? recipesRes.data.data
-            : []
-      );
+      setUserRecipes(Array.isArray(recetas) ? recetas : []);
       setFavoriteRecipes(favoritos);
       setFollowers(followersRes.success && Array.isArray(followersRes.data) ? followersRes.data : []);
       setFollowing(followingRes.success && Array.isArray(followingRes.data) ? followingRes.data : []);
       setUserCollections(customCollections);
-      // Guardar collectionsRes en fetchDebug para mostrarlo en el debug block
       setFetchDebug(prev => ({ ...prev, collectionsRes }));
     } catch (e) {
       debugInfo.error = e.message || e.toString();
       setFetchDebug(debugInfo);
-      setUserData(null);
-      setUserStats({ recipes: 0, followers: 0, following: 0 });
-      setUserRecipes([]);
-      setFavoriteRecipes([]);
-      setFollowers([]);
-      setFollowing([]);
-      setUserCollections([]);
+      setFetchError('No se pudieron cargar tus datos. Se mostrarán los datos de tu cuenta de Clerk.');
+      // Fallback: mostrar datos de Clerk
+      if (user) {
+        setUserData({
+          id: user.id,
+          username: user.username,
+          email: user.primaryEmailAddress?.emailAddress || user.emailAddresses?.[0]?.emailAddress || '',
+          imageUrl: user.imageUrl,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          description: user.publicMetadata?.bio || '',
+        });
+      }
     }
     setLoading(false);
   };
@@ -286,22 +306,24 @@ export default function ProfileScreen() {
     }
   }, [userId]);
 
-  // Helpers para mostrar datos
+  // Helpers para mostrar datos SOLO de Clerk
   const getUserDisplayName = () => {
-    if (userData && userData.firstName) return userData.firstName;
-    if (userData && userData.username) return userData.username;
+    if (user && (user.firstName || user.lastName)) return `${user.firstName || ''} ${user.lastName || ''}`.trim();
+    if (user && user.username) return user.username;
     return 'Usuario';
   };
   const getUserUsername = () => {
-    if (userData && userData.username) return `@${userData.username}`;
+    if (user && user.username) return `@${user.username}`;
     return userId ? `@${userId.slice(0, 8)}` : '@usuario';
   };
   const getUserBio = () => {
-    if (userData && userData.description) return userData.description;
+    if (user && user.publicMetadata && user.publicMetadata.bio) return user.publicMetadata.bio;
+    if (user && user.unsafeMetadata && user.unsafeMetadata.bio) return user.unsafeMetadata.bio;
+    if (user && user.bio) return user.bio;
     return '¡Comparte tus mejores recetas!';
   };
   const getUserProfileImage = () => {
-    if (userData && userData.imageUrl) return { uri: userData.imageUrl };
+    if (user && user.imageUrl) return { uri: user.imageUrl };
     return require('../assets/user.jpeg');
   };
 
@@ -320,6 +342,36 @@ export default function ProfileScreen() {
         recipeData: JSON.stringify(recipe)
       }
     });
+  };
+
+  const handleDeleteRecipe = (recipe) => {
+    setRecipeToDelete(recipe);
+    setDeleteModalVisible(true);
+  };
+
+  const confirmDeleteRecipe = async () => {
+    if (!recipeToDelete) return;
+    try {
+      setDeleteModalVisible(false);
+      setLoading(true);
+      const token = await getToken();
+      const url = API_URLS.RECIPES.DELETE(recipeToDelete.id);
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('No se pudo eliminar la receta');
+      Alert.alert('Receta eliminada', 'La receta fue eliminada exitosamente.');
+      fetchProfileData();
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo eliminar la receta.');
+    } finally {
+      setRecipeToDelete(null);
+      setLoading(false);
+    }
   };
 
   // Modal de colección custom
@@ -460,15 +512,15 @@ export default function ProfileScreen() {
       <Text style={styles.bio}>{getUserBio()}</Text>
       <View style={styles.statsContainer}>
         <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{userStats.recipes}</Text>
+          <Text style={styles.statNumber}>{userRecipes.length > 0 ? userRecipes.length : userStats.recipes}</Text>
           <Text style={styles.statLabel}>Recetas</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.statBox} onPress={handleFollowingPress} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{userStats.following}</Text>
+          <Text style={styles.statNumber}>{following.length > 0 ? following.length : userStats.following}</Text>
           <Text style={styles.statLabel}>Siguiendo</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.statBox} onPress={handleFollowersPress} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{userStats.followers}</Text>
+          <Text style={styles.statNumber}>{followers.length > 0 ? followers.length : userStats.followers}</Text>
           <Text style={styles.statLabel}>Seguidores</Text>
         </TouchableOpacity>
       </View>
@@ -565,49 +617,100 @@ export default function ProfileScreen() {
     );
   };
 
+  // Esperar a que Clerk cargue el usuario
+  if (!userLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+        <ActivityIndicator size="large" color="#E2773C" />
+        <Text style={{ marginTop: 16, color: '#666' }}>Cargando usuario...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
+      {/* Eliminado: Dump visual de datos crudos para depuración */}
       {loading ? (
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
           <ActivityIndicator size="large" color="#E2773C" />
           <Text style={{ marginTop: 16, color: '#666' }}>Cargando perfil...</Text>
         </View>
+      ) : fetchError ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+          <Text style={{ color: 'red', fontSize: 16, marginBottom: 12 }}>{fetchError}</Text>
+          <TouchableOpacity style={[styles.actionButton, styles.orangeButton]} onPress={fetchProfileData}>
+            <Text style={styles.actionButtonText}>Reintentar</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <>
           {renderProfileHeader()}
           {activeTab === 'My Recipes' ? (
-            <FlatList
-              data={userRecipes}
-              keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
-              numColumns={2}
-              renderItem={({ item }) => (
-                <View style={styles.recipeCard}>
-                  <RecipeCard
-                    recipe={{
-                      ...item,
-                      title: item.title || 'Sin título',
-                      description: item.description || 'Sin descripción',
-                      averageRating: item.averageRating || item.rating || 4.2,
-                      estimatedTime: item.estimatedTime || item.duration || 30,
-                    }}
-                    onPress={() => router.push(`/recipe/${item.id}`)}
-                    onEdit={(recipe) => handleEditRecipe(recipe)}
-                    isOwner={true}
-                  />
-                </View>
-              )}
-              contentContainerStyle={styles.recipesGrid}
-              showsVerticalScrollIndicator={false}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
-                  <Text style={styles.emptyStateSubtext}>¡Crea tu primera receta y compártela!</Text>
-                  <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} onPress={() => router.push('/(tabs)/create-recipe')}>
-                    <Text style={styles.actionButtonText}>Crear Receta</Text>
-                  </TouchableOpacity>
-                </View>
-              }
-            />
+            <>
+              <FlatList
+                data={userRecipes}
+                keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
+                numColumns={2}
+                renderItem={({ item }) => (
+                  <View style={styles.recipeCard}>
+                    <RecipeCard
+                      recipe={{
+                        ...item,
+                        title: item.title || 'Sin título',
+                        description: item.description || 'Sin descripción',
+                        estimatedTime: item.estimatedTime || item.duration || 30,
+                      }}
+                      onPress={() => router.push({
+                        pathname: '/(tabs)/recipe',
+                        params: { post: JSON.stringify(item) }
+                      })}
+                      isOwner={true}
+                      onEdit={() => {
+                        router.push({ pathname: '/edit-recipe', params: { recipeData: JSON.stringify(item) } });
+                      }}
+                      onDelete={() => handleDeleteRecipe(item)}
+                      editDisabled={item.status !== 'approved'}
+                    />
+                  </View>
+                )}
+                contentContainerStyle={styles.recipesGrid}
+                showsVerticalScrollIndicator={false}
+                ListEmptyComponent={
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      ¡Crea tu primera receta y compártela!
+                    </Text>
+                    <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} onPress={() => router.push('/(tabs)/create-recipe')}>
+                      <Text style={styles.actionButtonText}>Crear Receta</Text>
+                    </TouchableOpacity>
+                  </View>
+                }
+              />
+              {/* Render tolerante de seguidores y seguidos */}
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16 }}>Seguidores ({followers.length})</Text>
+                {Array.isArray(followers) && followers.length > 0 ? (
+                  followers.map((f, idx) => (
+                    <View key={f.id || idx} style={{ borderBottomWidth: 1, borderColor: '#eee', paddingVertical: 4 }}>
+                      <Text style={{ color: '#222' }}>{f.user?.username || f.user?.id || f.id || JSON.stringify(f)}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={{ color: '#888' }}>Sin seguidores</Text>
+                )}
+                <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16, marginTop: 8 }}>Siguiendo ({following.length})</Text>
+                {Array.isArray(following) && following.length > 0 ? (
+                  following.map((f, idx) => (
+                    <View key={f.id || idx} style={{ borderBottomWidth: 1, borderColor: '#eee', paddingVertical: 4 }}>
+                      <Text style={{ color: '#222' }}>{f.user?.username || f.user?.id || f.id || JSON.stringify(f)}</Text>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={{ color: '#888' }}>No sigues a nadie</Text>
+                )}
+              </View>
+            </>
           ) : activeTab === 'Favorites' ? (
             <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
               <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 12, marginLeft: 4 }}>
@@ -616,11 +719,32 @@ export default function ProfileScreen() {
               <View style={{ marginBottom: 24 }}>
                 <FlatList
                   data={favoriteRecipes}
-                  keyExtractor={(item) => item.id.toString()}
-                  horizontal
-                  renderItem={({ item }) => <RecipeCard recipe={item} />}
+                  keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
+                  numColumns={2}
+                  renderItem={({ item }) => (
+                    <View style={styles.recipeCard}>
+                      <RecipeCard
+                        recipe={{
+                          ...item,
+                          title: item.title || 'Sin título',
+                          description: item.description || 'Sin descripción',
+                          estimatedTime: item.estimatedTime || item.duration || 30,
+                        }}
+                        onPress={() => router.push({
+                          pathname: '/(tabs)/recipe',
+                          params: { post: JSON.stringify(item) }
+                        })}
+                      />
+                    </View>
+                  )}
+                  contentContainerStyle={styles.recipesGrid}
+                  showsVerticalScrollIndicator={false}
                   ListEmptyComponent={<Text style={{ color: '#888' }}>No tienes recetas favoritas.</Text>}
                 />
+                {/* Si userStats dice que hay favoritos pero el array está vacío, mostrar el array en texto para depuración */}
+                {userStats.favorites > 0 && favoriteRecipes.length === 0 && (
+                  <Text style={{ color: 'red', fontSize: 12 }}>favoriteRecipes vacío pero userStats.favorites = {userStats.favorites}. Datos: {JSON.stringify(favoriteRecipes)}</Text>
+                )}
               </View>
               {/* Render colecciones personalizadas (solo local) */}
               {renderCustomCollections()}
@@ -719,6 +843,31 @@ export default function ProfileScreen() {
                 style={{ maxHeight: 400, minWidth: 260, width: 320, alignSelf: 'center' }}
               />
             )}
+          </View>
+        </View>
+      </Modal>
+      {/* Modal de confirmación de borrado */}
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setDeleteModalVisible(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: 300, alignItems: 'center' }}>
+            <Ionicons name="trash" size={40} color="#ef4444" style={{ marginBottom: 12 }} />
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>¿Desea eliminar?</Text>
+            <Text style={{ color: '#666', marginBottom: 20, textAlign: 'center' }}>
+              Esta acción enviará una solicitud al administrador para eliminar la receta "{recipeToDelete?.title}". ¿Desea continuar?
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 16 }}>
+              <TouchableOpacity onPress={() => setDeleteModalVisible(false)} style={{ padding: 10, borderRadius: 8, backgroundColor: '#e0e0e0', marginRight: 8 }}>
+                <Text style={{ color: '#333' }}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={confirmDeleteRecipe} style={{ padding: 10, borderRadius: 8, backgroundColor: '#ef4444' }}>
+                <Text style={{ color: '#fff' }}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

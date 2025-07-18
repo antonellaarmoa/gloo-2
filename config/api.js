@@ -111,6 +111,7 @@ export const API_URLS = {
     UNFOLLOW: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/unfollow`),
     FOLLOWERS: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/followers`),
     FOLLOWING: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/following`),
+    STATS: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/stats`),
   },
   SEARCH: {
     RECIPES: (query) => buildApiUrl(`${API_CONFIG.ENDPOINTS.SEARCH}/recipes`, { q: query }),

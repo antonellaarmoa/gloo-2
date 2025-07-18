@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { API_CONFIG, buildApiUrl } from '../config/api';
 
-const API_URL = API_CONFIG.BASE_URL;
+const API_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
 
 export default function AccountDetailsScreen() {
   const router = useRouter();

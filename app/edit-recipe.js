@@ -65,7 +65,7 @@ const makeApiRequest = async (url, options = {}) => {
 export default function EditRecipeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId, getToken } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [prepTime, setPrepTime] = useState('');
@@ -91,8 +91,41 @@ export default function EditRecipeScreen() {
         Alert.alert('Error', 'No se pudo cargar la receta para editar');
         router.back();
       }
+    } else if (params.recipeId) {
+      // Si solo se recibe recipeId, buscar la receta en el backend
+      const fetchRecipeById = async () => {
+        try {
+          const token = await getToken();
+          const url = API_URLS.RECIPES.BY_ID(params.recipeId);
+          const res = await makeApiRequest(url, { headers: { 'Authorization': `Bearer ${token}` } });
+          console.log('Respuesta al buscar receta por ID:', res);
+          let recipeData = null;
+          if (res.success) {
+            // Buscar la receta en diferentes posibles campos
+            if (res.data && res.data.data) recipeData = res.data.data;
+            else if (res.data && res.data.recipe) recipeData = res.data.recipe;
+            else if (res.data && Array.isArray(res.data) && res.data.length > 0) recipeData = res.data[0];
+            else if (res.data && typeof res.data === 'object' && Object.keys(res.data).length > 0) recipeData = res.data;
+          }
+          if (recipeData) {
+            loadRecipeForEditing(recipeData);
+          } else {
+            if (res.status === 404) {
+              Alert.alert('No disponible', 'La receta no existe o no está aprobada. Solo puedes editar recetas aprobadas.');
+            } else {
+              Alert.alert('Error', 'No se pudo cargar la receta para editar (respuesta inesperada)');
+            }
+            router.back();
+          }
+        } catch (error) {
+          console.error('Error fetching recipe by ID:', error);
+          Alert.alert('Error', 'No se pudo cargar la receta para editar');
+          router.back();
+        }
+      };
+      fetchRecipeById();
     }
-  }, [params.recipeData]);
+  }, [params.recipeData, params.recipeId]);
 
   const loadRecipeForEditing = (recipeData) => {
     console.log('Cargando receta para editar:', recipeData);
@@ -142,25 +175,37 @@ export default function EditRecipeScreen() {
   // Función para actualizar la receta en el backend
   const updateRecipe = async (recipeData) => {
     try {
-      const media = recipeData.recipeImage || null;
-      const instructions = (recipeData.instructions || []).map((inst) => ({
-        description: inst.text || inst.description || '',
-        image: inst.media || null,
+      const token = await getToken();
+      const media = recipeData.recipeImage || '';
+      // Limpiar ingredients e instructions antes de enviar
+      const cleanIngredients = (recipeData.ingredients || []).map(i => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit: i.unit
       }));
+      const cleanInstructions = (recipeData.instructions || []).map(inst => ({
+        description: inst.description || inst.text || '',
+        image: inst.image || inst.media || '' // <-- nunca null, siempre string
+      }));
+      // Armar el payload solo con media si tiene valor
       const payload = {
         title: recipeData.title,
         description: recipeData.description,
         estimatedTime: recipeData.estimatedTime,
         servings: recipeData.servings,
-        media,
-        ingredients: recipeData.ingredients,
-        instructions,
+        ingredients: cleanIngredients,
+        instructions: cleanInstructions,
+        ...(media ? { media } : {})
       };
-      console.log('Payload para actualizar receta:', payload);
+      console.log('Payload limpio para actualizar receta:', JSON.stringify(payload, null, 2));
       const url = API_URLS.RECIPES.UPDATE(recipeId);
       const result = await makeApiRequest(url, {
         method: 'PUT',
         body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
       });
       console.log('Respuesta del backend (actualización):', result);
       return result;
@@ -265,7 +310,7 @@ export default function EditRecipeScreen() {
     return (
       <View style={styles.stepContainer}>
         <View style={styles.stepHeader}>
-          <TouchableOpacity onLongPress={drag} style={styles.dragHandle}>
+          <TouchableOpacity onLongPress={() => drag()} style={styles.dragHandle}>
             <MaterialCommunityIcons name="drag" size={24} color="#9ca3af" />
           </TouchableOpacity>
           <Text style={styles.stepNumber}>Paso {item.key}</Text>
@@ -373,33 +418,31 @@ export default function EditRecipeScreen() {
         userId,
         createdBy: userId,
         updatedBy: userId,
+        status: 'pending', // <-- Marcar como pendiente de aprobación
       };
 
       const result = await updateRecipe(recipeData);
 
-      if (result.success) {
-        Alert.alert(
-          "¡Éxito!",
-          "Tu receta ha sido actualizada correctamente.",
-          [
-            {
-              text: "Ver mi receta",
-              onPress: () => {
-                router.push(`/recipe/${recipeId}`);
-              }
-            },
-            {
-              text: "OK",
-              onPress: () => {
-                router.back();
-              }
+      // Mostrar siempre el mensaje de pendiente de aprobación
+      Alert.alert(
+        'Edición pendiente',
+        'Tu edición está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.back();
             }
-          ]
-        );
-      } else {
-        const errorMsg = result.data?.error || 'No se pudo actualizar la receta. Intenta nuevamente.';
-        Alert.alert('Error', errorMsg);
-      }
+          }
+        ]
+      );
+      // Opcional: si quieres refrescar la receta o el perfil, hazlo aquí
+      // ...
+      // return;
+      //
+      // Si quieres mostrar el mensaje solo si el backend responde success, puedes dejar el if (result.success) y el else para error
+      //
+      // ... existing code ...
     } catch (error) {
       console.error('Error updating recipe:', error);
       Alert.alert(
@@ -428,7 +471,16 @@ export default function EditRecipeScreen() {
           <View style={styles.container}>
             {/* Header */}
             <View style={styles.headerContainer}>
-              <TouchableOpacity onPress={() => router.back()}>
+              <TouchableOpacity onPress={() => {
+                try {
+                  router.back();
+                  setTimeout(() => {
+                    router.replace('/(tabs)/profile');
+                  }, 100);
+                } catch {
+                  router.replace('/(tabs)/profile');
+                }
+              }}>
                 <Ionicons name="chevron-back" size={24} color="#1e293b" />
               </TouchableOpacity>
               <View style={styles.headerTitleContainer}>

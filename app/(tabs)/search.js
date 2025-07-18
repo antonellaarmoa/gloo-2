@@ -22,10 +22,11 @@ import Slider from '@react-native-community/slider';
 import SaveRecipeModal from '../../components/SaveRecipeModal';
 import LikeButton from '../../components/LikeButton';
 import { addToFavorites, removeFromFavorites, isRecipeFavorite, syncFavoritesWithSavedState } from '../../utils/favoritesManager';
-import { API_URLS } from '../../config/api';
+import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
+import RecipeCard from '../../components/RecipeCard';
 
 const { width } = Dimensions.get('window');
-const API_URL = 'https://gloo-api-production.up.railway.app/api/v1';
+const API_URL = API_CONFIG.BASE_URL;
 
 const CATEGORIES = [
   { key: '1', label: 'Desayuno', icon: 'sunny-outline' },
@@ -1071,154 +1072,61 @@ export default function SearchScreen() {
     );
   };
 
-  const renderRecipe = ({ item }) => {
-    // Si es un resultado combinado, verificar si es una receta
+  const renderRecipe = ({ item, index }) => {
     if (item.type === 'user') {
-      return renderUser({ item });
+      return (
+        <View style={{ width: '100%', marginVertical: 8 }}>
+          {renderUser({ item })}
+        </View>
+      );
     }
-    
-    // Si no es una receta, no renderizar nada
     if (item.type && item.type !== 'recipe') {
       return null;
     }
-    
-    // Verificar que el item tenga las propiedades necesarias para ser una receta
     if (!item.title || !item.id) {
       return null;
     }
-    const getUserDisplayName = () => {
-      if (item.user && typeof item.user === 'object') {
-        return item.user.username || item.user.email?.split('@')[0] || 'user';
-      }
-      return item.user || 'user';
+    // Normalizar datos para RecipeCard
+    const normalizedRecipe = {
+      ...item,
+      title: item.title || '',
+      description: item.description || '',
+      image: typeof item.image === 'string' && item.image ? item.image : (typeof item.media === 'string' && item.media ? item.media : (typeof item.imageUrl === 'string' && item.imageUrl ? item.imageUrl : undefined)),
+      likes: item.likes ?? item.stats?.likes ?? 0,
+      averageRating: item.averageRating ?? item.rating ?? item.stats?.averageRating ?? 4.2,
+      estimatedTime: item.estimatedTime ?? item.cookingTime ?? item.duration ?? 20,
+      comments: item.comments ?? item.stats?.comments ?? 0,
     };
-
-    const getRecipeImage = () => {
-      // Usar la imagen real de la receta si existe
-      if (item.image && item.image !== 'null' && item.image !== '') {
-        return { uri: item.image };
-      }
-      // Fallbacks
-      const title = item.title?.toLowerCase() || '';
-      if (title.includes('tacos de pollo tikka') || title.includes('pollo tikka')) {
-        return require('../../assets/teriyaki.jpg');
-      } else if (title.includes('souffle') || title.includes('soufflé') || title.includes('queso')) {
-        return require('../../assets/hamburguesa.png');
-      } else if (title.includes('teriyaki') || title.includes('chicken bowl')) {
-        return require('../../assets/teriyaki.jpg');
-      } else if (title.includes('avocado') || title.includes('toast')) {
-        return require('../../assets/avocado-toast.jpg');
-      } else if (title.includes('french') || title.includes('toast')) {
-        return require('../../assets/french-toast.jpg');
-      } else if (title.includes('tacos') || title.includes('mexican') || title.includes('taco') || title.includes('pork') || title.includes('carnitas')) {
-        return require('../../assets/teriyaki.jpg');
-      } else {
-        return require('../../assets/french-toast.jpg');
-      }
-    };
-
-    // Calcular rating promedio si hay ratings
-    const getAverageRating = () => {
-      // Si hay ratings en el backend, usar esos datos
-      if (item.stats?.rates && item.stats.rates > 0) {
-        // Por ahora usar un valor fijo, pero se puede calcular con los datos reales
-        return '4.2';
-      }
-      // Si no hay ratings, mostrar un valor por defecto
-      return '4.2';
-    };
-
-    // Obtener ingredientes principales para mostrar
-    const getMainIngredients = () => {
-      // Verificar si hay ingredientes en diferentes formatos posibles
-      if (item.ingredients && Array.isArray(item.ingredients) && item.ingredients.length > 0) {
-        // Si es un array de objetos con propiedad 'name'
-        if (item.ingredients[0] && typeof item.ingredients[0] === 'object' && item.ingredients[0].name) {
-          return item.ingredients.slice(0, 3).map(ing => ing.name).join(', ');
-        }
-        // Si es un array de strings
-        else if (typeof item.ingredients[0] === 'string') {
-          return item.ingredients.slice(0, 3).join(', ');
-        }
-      }
-      
-      // Verificar si hay ingredientes en formato de string separado por comas
-      if (item.ingredients && typeof item.ingredients === 'string') {
-        const ingredientsArray = item.ingredients.split(',').map(ing => ing.trim());
-        return ingredientsArray.slice(0, 3).join(', ');
-      }
-      
-      // Verificar si hay ingredientes en formato de array de strings en una propiedad diferente
-      if (item.ingredientList && Array.isArray(item.ingredientList) && item.ingredientList.length > 0) {
-        return item.ingredientList.slice(0, 3).join(', ');
-      }
-      
-      // Si no hay ingredientes disponibles, mostrar un mensaje informativo
-      return 'Ingredientes no disponibles';
-    };
-
-    const { likes, liked } = likesState[item.id] || { likes: item.stats?.likes || 0, liked: false };
-    const isSaved = item ? savedRecipes[item.id] || false : false;
-    
     return (
-      <TouchableOpacity style={styles.recipeCard} onPress={() => router.push({ pathname: '/(tabs)/recipe', params: { id: item.id } })}>
-        <View style={styles.recipeImageContainer}>
-          <Image source={getRecipeImage()} style={styles.recipeImage} />
-          <View style={styles.recipeOverlay} />
-          <View style={styles.profileOverlay}>
-            <Image 
-              source={item.user?.imageUrl ? { uri: item.user.imageUrl } : require('../../assets/user.jpeg')} 
-              style={styles.profileAvatar} 
-            />
-            <TouchableOpacity onPress={() => toggleFollow(item.user?.id)} style={[styles.followCircle, { backgroundColor: followingState[item.user?.id] ? '#E2773C' : '#142E8B' }] }>
-              <Text style={{ color: 'white', fontSize: 12, fontWeight: 'bold' }}>{followingState[item.user?.id] ? '✓' : '+'}</Text>
-            </TouchableOpacity>
-            <Text style={styles.profileUser}>@{getUserDisplayName()}</Text>
-            <Text style={styles.profileTime}>{new Date(item.createdAt).toLocaleDateString()}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={() => handleSave(item.id)}
-          >
-            <View style={[styles.iconContainer, isSaved && styles.iconContainerSaved]}>
-              <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={24} color="white" style={styles.icon} />
-            </View>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.recipeInfo}>
-          <Text style={styles.recipeTitle}>{item.title}</Text>
-          <Text style={styles.recipeDesc}>{item.description || 'Sin descripción'}</Text>
-          
-          {/* Mostrar ingredientes principales */}
-          <Text style={styles.recipeIngredients}>{getMainIngredients()}</Text>
-          
-          <View style={styles.recipeMeta}>
-            <View style={styles.metaItem}>
-              <Ionicons name="time-outline" size={14} color="#666" />
-              <Text style={styles.recipeMetaText}>{item.estimatedTime || 30} min</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <Ionicons name="star" size={14} color="#666" />
-              <Text style={styles.recipeMetaText}>{getAverageRating()}</Text>
-            </View>
-            <View style={styles.metaItem}>
-              <LikeButton
-                recipeId={item.id}
-                userId={userId}
-                initialLiked={!!likesState?.[item.id]}
-                initialCount={item.likes || 0}
-                size={14}
-                showCount={false}
-                style={{ marginRight: 2 }}
-              />
-            </View>
-            <View style={styles.metaItem}>
-              <Ionicons name="chatbubble-outline" size={14} color="#666" />
-              <Text style={styles.recipeMetaText}>{item.stats?.comments || 0}</Text>
+      <View style={styles.recipeCardImproved}>
+        <TouchableOpacity onPress={() => router.push({ pathname: '/(tabs)/recipe', params: { id: item.id } })} activeOpacity={0.92}>
+          <Image
+            source={normalizedRecipe.image ? { uri: normalizedRecipe.image } : require('../../assets/hamburguesa.png')}
+            style={styles.recipeImageImproved}
+          />
+          <View style={styles.recipeInfoImproved}>
+            <Text style={styles.recipeTitleImproved} numberOfLines={1}>{normalizedRecipe.title}</Text>
+            {item.user && item.user.username && (
+              <Text style={styles.recipeUserImproved} numberOfLines={1}>por @{item.user.username}</Text>
+            )}
+            <Text style={styles.recipeDescImproved} numberOfLines={2}>{normalizedRecipe.description}</Text>
+            <View style={styles.recipeMetaImproved}>
+              <View style={styles.metaItemImproved}>
+                <Ionicons name="star" size={13} color="#fbbf24" />
+                <Text style={styles.metaImproved}>{normalizedRecipe.averageRating}</Text>
+              </View>
+              <View style={styles.metaItemImproved}>
+                <Ionicons name="time-outline" size={13} color="#E2773C" />
+                <Text style={styles.metaImproved}>{normalizedRecipe.estimatedTime} min</Text>
+              </View>
+              <View style={styles.metaItemImproved}>
+                <Ionicons name="heart-outline" size={13} color="#ef4444" />
+                <Text style={styles.metaImproved}>{normalizedRecipe.likes}</Text>
+              </View>
             </View>
           </View>
-        </View>
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -1347,47 +1255,28 @@ export default function SearchScreen() {
           data={
             activeTab === 'users' ? userResults :
             activeTab === 'recipes' ? results :
-            combinedResults
+            [...results.map(r => ({ ...r, type: 'recipe' })), ...userResults.map(u => ({ ...u, type: 'user' }))]
           }
-          renderItem={activeTab === 'users' ? renderUser : renderRecipe}
-          keyExtractor={(item) => 
-            activeTab === 'users' ? 
+          renderItem={({ item, index }) => {
+            if (activeTab === 'users') return renderUser({ item });
+            if (item.type === 'user') return renderUser({ item });
+            return renderRecipe({ item, index });
+          }}
+          keyExtractor={(item) =>
+            item.type === 'user' || activeTab === 'users' ?
               item.externalId?.toString() || Math.random().toString() :
               item.id?.toString() || Math.random().toString()
           }
-          contentContainerStyle={styles.resultsContainer}
+          contentContainerStyle={[styles.resultsContainer, { paddingBottom: 40 }]}
           showsVerticalScrollIndicator={false}
+          numColumns={1}
+          columnWrapperStyle={null}
           ListEmptyComponent={
             !loading && (
-              <View style={styles.emptyContainer}>
-                <Ionicons name="search-outline" size={64} color="#ccc" />
-                <Text style={styles.emptyText}>
-                  {activeTab === 'users' ? 'No se encontraron usuarios' :
-                   activeTab === 'recipes' ? 'No se encontraron recetas' :
-                   'No se encontraron resultados'}
-                </Text>
-                <Text style={styles.emptySubtext}>Intenta con otros términos de búsqueda</Text>
-                
-                {/* Sugerencias cuando no hay resultados */}
-                {search.trim() && (
-                  <View style={styles.suggestionsContainer}>
-                    <Text style={styles.suggestionTitle}>Sugerencias:</Text>
-                    <View style={styles.suggestionPills}>
-                      {suggestions.slice(0, 6).map((suggestion, index) => (
-                        <TouchableOpacity 
-                          key={index} 
-                          style={styles.suggestionPill} 
-                          onPress={() => setSearch(suggestion)}
-                        >
-                          <Text style={styles.suggestionText}>{suggestion}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </View>
-                )}
-              </View>
+              <Text style={styles.suggestionTitle}>No se encontraron resultados</Text>
             )
           }
+          key={activeTab + '-list'}
         />
       )}
 
@@ -1890,15 +1779,82 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  recipeCard: {
+  recipeCardImproved: {
+    width: '100%',
     backgroundColor: '#fff',
     borderRadius: 16,
     marginBottom: 16,
+    alignSelf: 'stretch',
+    elevation: 2,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOpacity: 0.08,
     shadowRadius: 8,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    overflow: 'hidden',
+  },
+  recipeImageImproved: {
+    width: '100%',
+    height: 120,
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    resizeMode: 'cover',
+  },
+  recipeInfoImproved: {
+    padding: 12,
+  },
+  recipeTitleImproved: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#222',
+    marginBottom: 2,
+  },
+  recipeUserImproved: {
+    fontSize: 12,
+    color: '#E2773C',
+    marginBottom: 2,
+    fontWeight: '500',
+  },
+  recipeDescImproved: {
+    fontSize: 12,
+    color: '#666',
+    marginBottom: 8,
+    lineHeight: 16,
+  },
+  recipeMetaImproved: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  metaItemImproved: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  metaImproved: {
+    fontSize: 12,
+    color: '#E2773C',
+    fontWeight: 'bold',
+    marginLeft: 2,
+  },
+  recipeCardFixed: {
+    width: width / 2 - 24,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    alignSelf: 'stretch',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+    minHeight: 200,
+    maxHeight: 220,
+    justifyContent: 'flex-start',
     overflow: 'hidden',
   },
   recipeImageContainer: {
@@ -2163,7 +2119,7 @@ const styles = StyleSheet.create({
   userCard: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    marginHorizontal: 16,
+    marginHorizontal: 0,
     marginVertical: 8,
     padding: 16,
     borderRadius: 12,
@@ -2172,6 +2128,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    width: '100%',
+    alignSelf: 'center',
   },
   userImage: {
     width: 60,

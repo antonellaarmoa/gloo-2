@@ -15,7 +15,7 @@ import { API_CONFIG, buildApiUrl } from '../config/api';
 
 const { width } = Dimensions.get('window');
 
-const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
+const API_URL = buildApiUrl('/api/v1/recipes');
 
 function fetchRecipes() {
   console.log('Fetching all recipes from:', API_URL);

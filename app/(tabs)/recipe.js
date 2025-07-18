@@ -110,14 +110,14 @@ export default function RecipeScreen() {
 
       try {
         // Verificar si la receta está liked
-        const likeResponse = await fetch(`${API_CONFIG.BASE_URL}/likes/${userId}/status/${recipeId}`);
+        const likeResponse = await fetch(`${API_CONFIG.BASE_URL}/api/v1/likes/${userId}/status/${recipeId}`);
         if (likeResponse.ok) {
           const likeData = await likeResponse.json();
           setIsLiked(likeData.data?.isLiked || false);
         }
 
         // Verificar si la receta está guardada
-        const saveResponse = await fetch(`${API_CONFIG.BASE_URL}/collections/${userId}/default/recipes`);
+        const saveResponse = await fetch(`${API_CONFIG.BASE_URL}/api/v1/collections/${userId}/default/recipes`);
         if (saveResponse.ok) {
           const saveData = await saveResponse.json();
           const isRecipeSaved = saveData.data?.some(recipe => recipe.id === recipeId);
@@ -126,7 +126,7 @@ export default function RecipeScreen() {
 
         // Verificar si sigue al usuario
         if (parsedPost.userId) {
-          const followResponse = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/following`);
+          const followResponse = await fetch(`${API_CONFIG.BASE_URL}/api/v1/follows/${userId}/following`);
           if (followResponse.ok) {
             const followData = await followResponse.json();
             const isFollowingUser = followData.data?.some(user => user.id === parsedPost.userId);
@@ -269,7 +269,7 @@ export default function RecipeScreen() {
     try {
       const method = isLiked ? 'DELETE' : 'POST';
       const endpoint = isLiked ? 'unlike' : 'like';
-      const response = await fetch(`${API_CONFIG.BASE_URL}/likes/${userId}/${endpoint}`, {
+      const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/likes/${userId}/${endpoint}`, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -291,7 +291,7 @@ export default function RecipeScreen() {
       console.log(`${action} recipe ${recipeId} to favorites for user ${userId}`);
       
       // Intentar primero con el endpoint de collections
-      let response = await fetch(`${API_CONFIG.BASE_URL}/collections/${userId}/default/recipes`, {
+      let response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/collections/${userId}/default/recipes`, {
         method,
         headers: {
           'Content-Type': 'application/json',
@@ -304,7 +304,7 @@ export default function RecipeScreen() {
         console.log('Collections endpoint failed, trying alternative...');
         
         // Intentar con el endpoint de favorites
-        response = await fetch(`${API_CONFIG.BASE_URL}/favorites/${userId}`, {
+        response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/favorites/${userId}`, {
           method,
           headers: {
             'Content-Type': 'application/json',
@@ -337,7 +337,7 @@ export default function RecipeScreen() {
     try {
       const method = isFollowing ? 'DELETE' : 'POST';
       const endpoint = isFollowing ? 'unfollow' : 'follow';
-      const response = await fetch(`${API_CONFIG.BASE_URL}/follows/${currentUserId}/${endpoint}`, {
+      const response = await fetch(`${API_CONFIG.BASE_URL}/api/v1/follows/${currentUserId}/${endpoint}`, {
         method,
         headers: {
           'Content-Type': 'application/json',

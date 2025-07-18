@@ -15,7 +15,7 @@ import { useAuth } from '@clerk/clerk-expo';
 import { Feather } from '@expo/vector-icons';
 import { API_CONFIG, buildApiUrl } from '../config/api';
 
-const API_URL = API_CONFIG.BASE_URL;
+const API_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
 
 export default function EditProfile() {
   const router = useRouter();
@@ -72,10 +72,13 @@ export default function EditProfile() {
 
     setSaving(true);
     try {
+      // 1. Actualizar en backend
+      const token = user && typeof user.getToken === 'function' ? await user.getToken() : null;
       const res = await fetch(`${API_URL}/users/${userId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           firstName: userData.firstName,
@@ -85,6 +88,11 @@ export default function EditProfile() {
           imageUrl: user?.imageUrl || undefined,
         }),
       });
+
+      // 2. Actualizar en Clerk
+      if (user && typeof user.update === 'function') {
+        await user.update({ publicMetadata: { bio: userData.description } });
+      }
 
       if (res.ok) {
         Alert.alert('Éxito', 'Perfil actualizado correctamente', [

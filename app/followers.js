@@ -32,7 +32,7 @@ export default function Followers() {
       
       // Intentar cargar seguidores desde el backend
       try {
-        const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/followers`);
+        const res = await fetch(`${API_CONFIG.BASE_URL}/api/v1/follows/${userId}/followers`);
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.data && data.data.followers) {
@@ -60,7 +60,7 @@ export default function Followers() {
   const handleFollowUser = async (targetUserId) => {
     try {
       // Intentar seguir al usuario desde el backend
-      const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/follow`, {
+      const res = await fetch(`${API_CONFIG.BASE_URL}/api/v1/follows/${userId}/follow`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

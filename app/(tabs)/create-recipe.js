@@ -24,6 +24,8 @@ import { useAuth } from '@clerk/clerk-expo';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URLS } from '../../config/api';
 import { useFocusEffect } from '@react-navigation/native';
+import * as ImageManipulator from 'expo-image-manipulator';
+import { Video } from 'expo-av';
 
 // Función robusta para hacer peticiones a la API
 const makeApiRequest = async (url, options = {}) => {
@@ -59,12 +61,10 @@ const makeApiRequest = async (url, options = {}) => {
     };
   }
 };
-import * as ImageManipulator from 'expo-image-manipulator';
-import { Video } from 'expo-av';
 
 export default function CreateRecipeScreen() {
   const router = useRouter();
-  const { isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId, getToken } = useAuth();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [prepTime, setPrepTime] = useState('');
@@ -82,6 +82,34 @@ export default function CreateRecipeScreen() {
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isEditingExisting, setIsEditingExisting] = useState(false);
   const [recipeId, setRecipeId] = useState(null);
+  const [userRecipes, setUserRecipes] = useState([]);
+  // Guardar el ID de la receta a eliminar si el usuario elige reemplazar
+  const [replaceRecipeId, setReplaceRecipeId] = useState(null);
+
+  // Al cargar la pantalla, obtener recetas del usuario
+  useEffect(() => {
+    if (userId) {
+      fetchUserRecipes();
+    }
+  }, [userId]);
+
+  const fetchUserRecipes = async () => {
+    try {
+      const res = await fetch(API_URLS.RECIPES.BY_USER(userId));
+      const data = await res.json();
+      if (data.success && Array.isArray(data.data)) {
+        setUserRecipes(data.data);
+      } else if (Array.isArray(data)) {
+        setUserRecipes(data);
+      } else if (data.data && Array.isArray(data.data.data)) {
+        setUserRecipes(data.data.data);
+      } else {
+        setUserRecipes([]);
+      }
+    } catch (e) {
+      setUserRecipes([]);
+    }
+  };
 
   // Cargar borrador al abrir la pantalla
   useEffect(() => {
@@ -166,10 +194,12 @@ export default function CreateRecipeScreen() {
 
   const deleteRecipeFromBackend = async (id) => {
     try {
+      const token = await getToken();
       const response = await fetch(`${API_URLS.RECIPES.DELETE(id)}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
       if (!response.ok) {
@@ -268,6 +298,7 @@ export default function CreateRecipeScreen() {
   // Función para crear la receta en el backend
   const createRecipe = async (recipeData) => {
     try {
+      const token = await getToken();
       const media = recipeData.recipeImage || null;
       const instructions = (recipeData.instructions || []).map((inst) => ({
         description: inst.text || inst.description || '',
@@ -281,50 +312,33 @@ export default function CreateRecipeScreen() {
         media,
         ingredients: recipeData.ingredients,
         instructions,
+        status: 'pending', // Siempre pendiente
       };
       console.log('Payload enviado al backend:', payload);
       const url = API_URLS.RECIPES.CREATE(recipeData.userId);
       const result = await makeApiRequest(url, {
         method: 'POST',
         body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
       });
       console.log('Respuesta del backend:', result);
-      if (result.success) {
+      // Mostrar siempre el mensaje de pendiente de aprobación
         Alert.alert(
-          "¡Éxito!",
-          "Tu receta ha sido creada y publicada correctamente.",
+        'Creación pendiente',
+        'Tu receta está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
           [
             {
-              text: "Ver mi receta",
+            text: 'OK',
               onPress: () => {
-                router.push('/recipecreated');
-              }
-            },
-            {
-              text: "Crear otra",
-              onPress: async () => {
-                // Limpiar formulario solo si NO hay borrador guardado
-                const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
-                if (!draftData) {
-                  setTitle('');
-                  setDescription('');
-                  setPrepTime('');
-                  setCookTime('');
-                  setIngredients([]);
-                  setSteps([{ key: '1', text: '', media: null }]);
-                  setRecipeImage(null);
-                  setNewIngredient('');
-                  setNewAmount('');
-                  setNewUnit('');
-                  setIsEditingExisting(false);
-                  setRecipeId(null);
-                }
-                clearDraft();
+              router.replace('/(tabs)/home');
               }
             }
           ]
         );
-        // Limpiar campos SIEMPRE después de publicar
+      // Limpiar campos SIEMPRE después de enviar
         setTitle('');
         setDescription('');
         setPrepTime('');
@@ -338,10 +352,6 @@ export default function CreateRecipeScreen() {
         setIsEditingExisting(false);
         setRecipeId(null);
         clearDraft();
-      } else {
-        const errorMsg = result.data?.error || 'No se pudo crear la receta. Intenta nuevamente.';
-        Alert.alert('Error', errorMsg);
-      }
       return result;
     } catch (error) {
       console.error('Error creating recipe:', error);
@@ -353,6 +363,7 @@ export default function CreateRecipeScreen() {
   // Función para actualizar la receta en el backend
   const updateRecipe = async (recipeId, recipeData) => {
     try {
+      const token = await getToken();
       const media = recipeData.recipeImage || null;
       const instructions = (recipeData.instructions || []).map((inst) => ({
         description: inst.text || inst.description || '',
@@ -366,40 +377,34 @@ export default function CreateRecipeScreen() {
         media,
         ingredients: recipeData.ingredients,
         instructions,
+        status: 'pending', // Siempre pendiente
       };
       console.log('Payload para actualizar receta:', payload);
       const url = API_URLS.RECIPES.UPDATE(recipeId);
       const result = await makeApiRequest(url, {
         method: 'PUT',
         body: JSON.stringify(payload),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
       });
       console.log('Respuesta del backend (actualización):', result);
-      if (result.success) {
+      // Mostrar siempre el mensaje de pendiente de aprobación
         Alert.alert(
-          "¡Éxito!",
-          "Tu receta ha sido actualizada correctamente.",
+        'Edición pendiente',
+        'Tu edición está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
           [
             {
-              text: "Ver mi receta",
-              onPress: () => {
-                router.push(`/recipe/${recipeId}`);
-              }
-            },
-            {
-              text: "OK",
+            text: 'OK',
               onPress: () => {
                 router.back();
               }
             }
           ]
         );
-        // Limpiar formulario después de actualizar
         clearForm();
         clearDraft();
-      } else {
-        const errorMsg = result.data?.error || 'No se pudo actualizar la receta. Intenta nuevamente.';
-        Alert.alert('Error', errorMsg);
-      }
       return result;
     } catch (error) {
       console.error('Error updating recipe:', error);
@@ -606,6 +611,11 @@ export default function CreateRecipeScreen() {
     setIsPublishing(true);
 
     try {
+      // Si hay que reemplazar, eliminar primero la receta existente
+      if (replaceRecipeId) {
+        await deleteRecipeFromBackend(replaceRecipeId);
+        setReplaceRecipeId(null); // Limpiar el estado
+      }
       const recipeData = {
         title: title.trim(),
         description: description.trim(),
@@ -722,34 +732,57 @@ export default function CreateRecipeScreen() {
     setShowSaveModal(true);
   };
 
+  // Confirmar eliminación: siempre status pending_delete y mensaje claro
   const confirmDelete = async () => {
     setShowDeleteModal(false);
-    
     try {
       if (isEditingExisting && recipeId) {
-        // Es una receta existente - eliminar del backend
-        await deleteRecipeFromBackend(recipeId);
-        Alert.alert(
-          "Receta Eliminada",
-          "La receta ha sido eliminada exitosamente del servidor.",
-          [{ text: "OK", onPress: () => router.back() }]
-        );
+        // Obtener los datos actuales de la receta para el payload
+        const recipe = userRecipes.find(r => r.id === recipeId);
+        if (!recipe) throw new Error('No se encontró la receta.');
+        const token = await getToken();
+        const url = API_URLS.RECIPES.UPDATE(recipeId);
+        // Payload completo requerido por el backend
+        const payload = {
+          title: recipe.title,
+          description: recipe.description,
+          estimatedTime: recipe.estimatedTime,
+          servings: recipe.servings,
+          media: recipe.image || recipe.media || null,
+          ingredients: recipe.ingredients,
+          instructions: recipe.instructions,
+          status: 'pending_delete', // Siempre pendiente de aprobación
+        };
+        const res = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
+        // Mensaje claro de pendiente de aprobación
+          Alert.alert(
+          'Eliminación pendiente',
+            'La solicitud de eliminación fue enviada y está pendiente de aprobación del administrador.',
+            [{ text: 'OK', onPress: () => router.back() }]
+          );
       } else {
         // Es una receta nueva - solo limpiar formulario y borradores
         clearForm();
         await clearDraft();
         Alert.alert(
-          "Formulario Limpiado",
-          "El formulario ha sido limpiado y los borradores eliminados.",
-          [{ text: "OK", onPress: () => router.back() }]
+          'Formulario Limpiado',
+          'El formulario ha sido limpiado y los borradores eliminados.',
+          [{ text: 'OK', onPress: () => router.back() }]
         );
       }
     } catch (error) {
       console.error('Error confirming delete:', error);
       Alert.alert(
-        "Error",
-        "No se pudo completar la operación. Por favor, intenta nuevamente.",
-        [{ text: "OK" }]
+        'Error',
+        'No se pudo completar la operación. Por favor, intenta nuevamente.',
+        [{ text: 'OK' }]
       );
     }
   };
@@ -805,6 +838,35 @@ export default function CreateRecipeScreen() {
 
   const cancelSave = () => {
     setShowSaveModal(false);
+  };
+
+  // Verificar duplicado al cambiar el título
+  const handleTitleChange = (newTitle) => {
+    setTitle(newTitle);
+    if (!newTitle.trim() || !userRecipes.length) return;
+    const normalized = newTitle.trim().toLowerCase().replace(/\s+/g, ' ');
+    const existing = userRecipes.find(r => (r.title || '').trim().toLowerCase().replace(/\s+/g, ' ') === normalized);
+    if (existing && !isEditingExisting) {
+      Alert.alert(
+        'Receta duplicada',
+        'Ya tienes una receta con ese nombre. ¿Qué deseas hacer?',
+        [
+          {
+            text: 'Editar receta',
+            onPress: () => loadRecipeForEditing(existing),
+          },
+          {
+            text: 'Reemplazar',
+            style: 'destructive',
+            onPress: () => {
+              setIsEditingExisting(false); // Para que el flujo sea de creación
+              setReplaceRecipeId(existing.id); // Guardar el ID a eliminar
+            },
+          },
+          { text: 'Cancelar', style: 'cancel' },
+        ]
+      );
+    }
   };
 
   return (
@@ -871,7 +933,7 @@ export default function CreateRecipeScreen() {
 
             {recipeImage && (
               <View style={{ alignItems: 'center', marginVertical: 16 }}>
-                {recipeImage.startsWith('data:video') ? (
+                {recipeImage.startsWith('data:video') || recipeImage.endsWith('.mp4') || recipeImage.endsWith('.mov') || recipeImage.endsWith('.webm') ? (
                   <Video
                     source={{ uri: recipeImage }}
                     style={{ width: 200, height: 200, borderRadius: 16 }}
@@ -886,7 +948,7 @@ export default function CreateRecipeScreen() {
                   />
                 )}
                 <Text style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
-                  {recipeImage.startsWith('data:video') ? 'Vista previa de video' : 'Vista previa de la imagen'}
+                  {recipeImage.startsWith('data:video') || recipeImage.endsWith('.mp4') || recipeImage.endsWith('.mov') || recipeImage.endsWith('.webm') ? 'Vista previa de video' : 'Vista previa de la imagen'}
                 </Text>
               </View>
             )}
@@ -897,7 +959,7 @@ export default function CreateRecipeScreen() {
               placeholder="Recipe Title"
               placeholderTextColor="#9ca3af"
               value={title}
-              onChangeText={setTitle}
+              onChangeText={handleTitleChange}
             />
             <TextInput
               style={styles.textArea}

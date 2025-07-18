@@ -59,6 +59,8 @@ export default function NotificationScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [followStates, setFollowStates] = useState({});
+  // Mostrar datos crudos para depuración
+  const [rawDebug, setRawDebug] = useState({});
 
   // Helper para llamadas autenticadas
   const apiRequestWithAuth = async (url, options = {}) => {
@@ -99,26 +101,16 @@ export default function NotificationScreen() {
       // Cargar notificaciones locales primero
       const localNotifications = await loadNotificationsLocally();
       const localFollowStates = await loadFollowStatesLocally();
-      
       if (localNotifications.length > 0) {
         setNotifications(localNotifications);
         setFollowStates(localFollowStates);
       }
-
       // Intentar sincronizar con el backend
-      console.log('Fetching notifications from backend for userId:', userId);
-      const { success, response, data, error } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}`);
-
-      console.log('Backend notifications response:', {
-        success,
-        status: response?.status,
-        hasData: !!data,
-        dataKeys: data ? Object.keys(data) : [],
-        error: error?.message
-      });
-
-      if (success && response.ok && data.success && data.data.notifications) {
-        console.log('Backend notifications data:', data.data);
+      const { success, response, data, error } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}?t=${Date.now()}`);
+      // Mostrar datos crudos para depuración
+      setRawDebug({ backend: data, local: localNotifications });
+      // Fallback robusto: si el backend responde mal, usar local/mock
+      if (success && response.ok && data && data.success && data.data && Array.isArray(data.data.notifications)) {
         const backendNotifications = data.data.notifications.map(notif => ({
           id: notif.id,
           type: notif.type,
@@ -129,47 +121,30 @@ export default function NotificationScreen() {
           sender: notif.sender,
           relatedId: notif.relatedId,
           relatedType: notif.relatedType,
-          // Datos para mostrar en la UI
           names: notif.sender ? [notif.sender.firstName || notif.sender.username || 'Usuario'] : [],
           avatar: notif.sender?.imageUrl ? { uri: notif.sender.imageUrl } : require('../../assets/user.jpeg'),
           image: notif.relatedType === 'recipe' ? require('../../assets/french-toast.jpg') : null,
           logo: notif.type === 'approval' ? require('../../assets/logo.png') : null,
-          followed: false, // Por defecto
+          followed: false,
           userId: notif.sender?.id
         }));
-        
+        console.log('Notificaciones del backend (read):', backendNotifications.map(n => ({ id: n.id, read: n.read, type: n.type, title: n.title })));
         setNotifications(backendNotifications);
         await saveNotificationsLocally(backendNotifications);
-        console.log('Backend notifications loaded:', backendNotifications.length);
       } else {
-        console.log('Backend notifications failed, using local data');
-        console.log('Failure reason:', {
-          success,
-          responseOk: response?.ok,
-          dataSuccess: data?.success,
-          hasNotifications: data?.data?.notifications,
-          error
-        });
         // Si el backend falla, usar datos locales o mock
         if (localNotifications.length === 0) {
-          console.log('No local notifications, using mock data');
           const mockNotifications = getMockNotifications();
           setNotifications(mockNotifications);
           await saveNotificationsLocally(mockNotifications);
+        } else {
+          setNotifications(localNotifications);
         }
       }
     } catch (error) {
-      // Manejar específicamente errores de CORS y red de manera silenciosa
-      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-        console.log('Network error (CORS/connection), using local data');
-      } else if (error.name === 'AbortError') {
-        console.log('Request timeout, using local data');
-      } else {
-        console.error('Error fetching notifications:', error);
-      }
-      
-      // Si falla, usar datos locales o mock
+      // Fallback robusto: si hay error, usar local/mock
       const localNotifications = await loadNotificationsLocally();
+      setRawDebug({ error, local: localNotifications });
       if (localNotifications.length === 0) {
         const mockNotifications = getMockNotifications();
         setNotifications(mockNotifications);
@@ -187,7 +162,7 @@ export default function NotificationScreen() {
   const markAsRead = async (notificationId) => {
     if (!isSignedIn) return;
 
-    // Actualizar estado local inmediatamente
+    // Actualizar estado local inmediatamente (opcional, para feedback rápido)
     const updatedNotifications = notifications.map(notif => 
       notif.id === notificationId 
         ? { ...notif, read: true }
@@ -197,10 +172,13 @@ export default function NotificationScreen() {
     await saveNotificationsLocally(updatedNotifications);
 
     try {
-      const { success, response } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}/read`, {
+      const notificationIdsArr = [Number(notificationId)];
+      const { success, response, data } = await apiRequestWithAuth(`${API_CONFIG.BASE_URL}/notifications/${userId}/read`, {
         method: 'PUT',
-        body: JSON.stringify({ notificationId }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationIds: notificationIdsArr }),
       });
+      console.log('Respuesta al marcar como leída:', { success, status: response?.status, data });
       if (!success || !response.ok) {
         // Si falla, revertir local
         const reverted = notifications.map(notif => 
@@ -210,7 +188,11 @@ export default function NotificationScreen() {
         );
         setNotifications(reverted);
         await saveNotificationsLocally(reverted);
+      } else {
+        // Si el backend responde bien, refresca la lista desde el backend
+        fetchNotifications();
       }
+      console.log('Estado de notificaciones tras marcar como leída:', notifications);
     } catch (error) {
       // Si falla, revertir local
       const reverted = notifications.map(notif => 
@@ -459,60 +441,44 @@ export default function NotificationScreen() {
     fetchNotifications();
   };
 
-  const renderItem = ({ item }) => {
-    const isFollowing = followStates[item.id] !== undefined 
-      ? followStates[item.id] 
-      : (item.followed || false);
+  // Mostrar todas las notificaciones locales, sin filtrar por tipo
+  const filteredNotifications = notifications;
 
-    return (
-      <TouchableOpacity 
-        style={[styles.itemContainer, !item.read && styles.unreadItem]} 
-        onPress={() => markAsRead(item.id)}
-        activeOpacity={0.7}
-      >
-        {item.type === 'approval' ? (
-          <View style={styles.row}>
-            <Image source={item.logo} style={styles.logo} />
-            <View style={styles.textContainer}>
-              <Text style={styles.title}>
-                <Text style={styles.bold}>{item.title}</Text> - Good News!
-              </Text>
-              <Text style={[styles.message, !item.read && styles.unreadText]}>{item.message}</Text>
-              <Text style={styles.time}>{item.time}</Text>
-            </View>
-            <Image source={item.image} style={styles.recipeThumb} />
-            {!item.read && <View style={styles.unreadDot} />}
-          </View>
-        ) : (
-          <View style={styles.row}>
-            <Image source={item.avatar} style={styles.avatar} />
-            <View style={styles.textContainer}>
-              <Text style={[styles.message, !item.read && styles.unreadText]}>
-                <Text style={styles.bold}>{item.names.join(' and ')}</Text> {item.message}
-              </Text>
-              <Text style={styles.time}>{item.time}</Text>
-            </View>
-            {item.image && <Image source={item.image} style={styles.recipeThumb} />}
-            {item.type === 'follow' && (
-              <TouchableOpacity
-                style={[
-                  styles.followBtn,
-                  { backgroundColor: isFollowing ? '#1e3a8a' : '#f97316' }
-                ]}
-                onPress={() => toggleFollow(item.userId || 'user123', item.id)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.followText}>
-                  {isFollowing ? 'Following' : 'Follow'}
-                </Text>
-              </TouchableOpacity>
-            )}
-            {!item.read && <View style={styles.unreadDot} />}
-          </View>
+  // En el renderItem, mostrar badge de color y acceso a la receta
+  const renderItem = ({ item }) => (
+    <TouchableOpacity
+      style={[styles.notificationCard, { backgroundColor: item.read ? '#f3f4f6' : '#fff' }]}
+      onPress={() => {
+        if (item.relatedType === 'recipe' && item.relatedId) {
+          // Navegar a la receta relacionada
+          // navigation.navigate('recipe', { id: item.relatedId });
+        }
+        markAsRead(item.id);
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View style={[
+          styles.badge,
+          { backgroundColor:
+            item.type === 'recipe_pending' ? '#f59e42' :
+            item.type === 'recipe_delete_pending' ? '#ef4444' :
+            item.type === 'recipe_approved' ? '#22c55e' :
+            item.type === 'recipe_rejected' ? '#ef4444' :
+            item.type === 'recipe_deleted' ? '#ef4444' :
+            '#9ca3af'
+          }
+        ]}/>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>{item.title}</Text>
+          <Text style={styles.message}>{item.message}</Text>
+          <Text style={styles.time}>{item.time}</Text>
+        </View>
+        {item.relatedType === 'recipe' && (
+          <Ionicons name="fast-food-outline" size={22} color="#f97316" style={{ marginLeft: 8 }} />
         )}
-      </TouchableOpacity>
-    );
-  };
+      </View>
+    </TouchableOpacity>
+  );
 
   if (loading) {
     return (
@@ -541,15 +507,63 @@ export default function NotificationScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Eliminado: Dump visual de datos crudos para depuración */}
       <Text style={styles.sectionTitle}>
         Notificaciones {notifications.filter(n => !n.read).length > 0 && 
           `(${notifications.filter(n => !n.read).length})`
         }
       </Text>
       <FlatList
-        data={notifications}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
+        data={filteredNotifications}
+        keyExtractor={item => item.id?.toString()}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[
+              styles.notificationCard,
+              { backgroundColor: item.read ? '#f3f4f6' : '#fff',
+                borderColor: item.read ? '#e5e7eb' : '#fbbf24',
+                borderWidth: item.read ? 1 : 2,
+                shadowOpacity: item.read ? 0.05 : 0.13,
+                elevation: item.read ? 1 : 4,
+              }
+            ]}
+            onPress={() => {
+              if (item.relatedType === 'recipe' && item.relatedId) {
+                // Navegar a la receta relacionada
+                // navigation.navigate('recipe', { id: item.relatedId });
+              }
+              markAsRead(item.id);
+            }}
+            activeOpacity={0.88}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              {/* Avatar o logo */}
+              {item.avatar ? (
+                <Image source={item.avatar} style={styles.avatarLarge} />
+              ) : (
+                <View style={[styles.avatarLarge, { backgroundColor: '#f3f4f6', justifyContent: 'center', alignItems: 'center' }]}> 
+                  <Ionicons name="notifications-outline" size={32} color="#E2773C" />
+                </View>
+              )}
+              <View style={{ flex: 1, marginLeft: 14 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 2 }}>
+                  <Text style={styles.titleBold}>{item.title}</Text>
+                  {/* Badge de tipo */}
+                  <View style={[
+                    styles.badgeLarge,
+                    { backgroundColor: item.type === 'recipe_pending' ? '#f59e42' : item.type === 'recipe_delete_pending' ? '#ef4444' : item.type === 'recipe_approved' ? '#22c55e' : item.type === 'recipe_rejected' ? '#ef4444' : '#9ca3af',
+                      marginLeft: 8 }
+                  ]} />
+                  {item.relatedType === 'recipe' && (
+                    <Ionicons name="fast-food-outline" size={20} color="#f97316" style={{ marginLeft: 6 }} />
+                  )}
+                </View>
+                <Text style={styles.messageBig}>{item.message}</Text>
+                <Text style={styles.timeSmall}>{item.time}</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        )}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
         refreshControl={
@@ -705,5 +719,63 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: '#f97316',
     marginLeft: 8,
+  },
+  notificationCard: {
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  badge: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    marginRight: 10,
+  },
+  avatarLarge: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    marginRight: 0,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    shadowColor: '#fbbf24',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  badgeLarge: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    marginRight: 0,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  titleBold: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#E2773C',
+    fontFamily: 'Inter',
+    marginRight: 2,
+  },
+  messageBig: {
+    fontSize: 15,
+    color: '#374151',
+    fontFamily: 'Inter',
+    marginBottom: 2,
+    marginTop: 2,
+  },
+  timeSmall: {
+    fontSize: 12,
+    color: '#9ca3af',
+    fontFamily: 'Inter',
+    marginTop: 2,
   },
 });

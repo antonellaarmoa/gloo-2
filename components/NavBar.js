@@ -3,6 +3,7 @@ import { View, StyleSheet, TouchableOpacity, Text, Modal } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import { useState } from 'react';
+import { useNotifications } from '../context/NotificationContext';
 
 const TABS = [
   {
@@ -43,6 +44,8 @@ export default function NavBar({ state, descriptors, navigation }) {
   const { isSignedIn } = useAuth();
   const [showGuestOverlay, setShowGuestOverlay] = useState(false);
   const isGuest = !isSignedIn;
+  const { notifications = [] } = useNotifications();
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleTabPress = (tab) => {
     if (isGuest && !tab.guestAllowed) {
@@ -85,11 +88,26 @@ export default function NavBar({ state, descriptors, navigation }) {
             onPress={() => handleTabPress(tab)}
             style={styles.tabButton}
           >
-            <Ionicons
-              name={tab.icon}
-              size={24}
-              color={isFocused ? '#f97316' : '#9ca3af'}
-            />
+            <View style={{ position: 'relative' }}>
+              <Ionicons
+                name={tab.icon}
+                size={24}
+                color={isFocused ? '#f97316' : '#9ca3af'}
+              />
+              {tab.name === 'notification' && unreadCount > 0 && (
+                <View style={{
+                  position: 'absolute',
+                  top: -3,
+                  right: -3,
+                  width: 10,
+                  height: 10,
+                  borderRadius: 5,
+                  backgroundColor: '#ef4444',
+                  borderWidth: 1,
+                  borderColor: '#fff',
+                }} />
+              )}
+            </View>
             <Text style={[styles.tabLabel, { color: isFocused ? '#f97316' : '#9ca3af' }]}>{tab.label}</Text>
           </TouchableOpacity>
         );

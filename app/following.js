@@ -34,7 +34,8 @@ export default function Following() {
       
       // Intentar cargar seguidos desde el backend
       try {
-        const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/following`);
+        const API_BASE_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
+        const res = await fetch(`${API_BASE_URL}/follows/${userId}/following`);
         if (res.ok) {
           const data = await res.json();
           console.log('Following API response:', data);
@@ -78,7 +79,8 @@ export default function Following() {
       
       // Intentar sincronizar con backend
       try {
-        const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${userId}/unfollow`, {
+        const API_BASE_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
+        const res = await fetch(`${API_BASE_URL}/follows/${userId}/unfollow`, {
           method: 'DELETE',
           headers: {
             'Content-Type': 'application/json',

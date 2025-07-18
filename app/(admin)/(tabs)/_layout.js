@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
 import { useRouter } from 'expo-router';
-import { TouchableOpacity, Modal, View, Text, StyleSheet, Alert } from 'react-native';
+import { TouchableOpacity, Modal, View, Text, StyleSheet, Alert, Image } from 'react-native';
 import { useState } from 'react';
 
 export default function AdminTabsLayout() {
@@ -24,9 +24,10 @@ export default function AdminTabsLayout() {
   const logoutButton = () => (
     <TouchableOpacity
       onPress={() => setShowLogoutModal(true)}
-      style={{ marginRight: 18 }}
+      style={{ marginRight: 18, flexDirection: 'row', alignItems: 'center' }}
     >
       <Ionicons name="log-out-outline" size={26} color="#f97316" />
+      <Text style={{ color: '#f97316', fontWeight: '600', fontSize: 16, marginLeft: 6, fontFamily: 'Inter' }}>Cerrar sesión</Text>
     </TouchableOpacity>
   );
 
@@ -67,20 +68,22 @@ export default function AdminTabsLayout() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Ionicons name="log-out-outline" size={48} color="#f97316" style={styles.modalIcon} />
-            <Text style={styles.modalTitle}>¿Cerrar sesión?</Text>
-            <Text style={styles.modalMessage}>
-              ¿Estás seguro de que quieres cerrar sesión? Tendrás que volver a iniciar sesión para acceder al panel de administración.
-            </Text>
-            <View style={styles.modalButtons}>
+            {/* Círculo de fondo para la imagen del personaje enojado */}
+            <View style={{ width: 110, height: 110, borderRadius: 55, backgroundColor: '#142E8B', alignSelf: 'center', justifyContent: 'center', alignItems: 'center', marginBottom: 24 }}>
+              <Image source={require('../../../assets/glooenojado.png')} style={{ width: 100, height: 100 }} />
+            </View>
+            <Text style={[styles.modalTitle, { fontSize: 24, marginBottom: 18, textAlign: 'center' }]}>¿Cerrar sesión?</Text>
+            <Text style={[styles.modalMessage, { fontSize: 17, lineHeight: 25, marginBottom: 32, textAlign: 'center' }]}>¿Estás seguro de que quieres cerrar sesión? Tendrás que volver a iniciar sesión para acceder al panel de administración.</Text>
+            <View style={[styles.modalButtons, { gap: 18, marginTop: 8 }]}>
               <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
+                style={[styles.modalButton, styles.cancelButton, { minWidth: 120, paddingVertical: 16 }]}
                 onPress={() => setShowLogoutModal(false)}
                 activeOpacity={0.8}
               >
                 <Text style={styles.cancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalButton, styles.logoutButton]}
+                style={[styles.modalButton, styles.logoutButton, { minWidth: 140, paddingVertical: 16 }]}
                 onPress={handleLogout}
                 activeOpacity={0.8}
               >
@@ -104,16 +107,17 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: 28,
+    paddingVertical: 36,
+    paddingHorizontal: 28,
     alignItems: 'center',
-    maxWidth: 320,
-    width: '100%',
+    maxWidth: 340,
+    width: '90%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    elevation: 12,
   },
   modalIcon: {
     marginBottom: 16,
@@ -143,7 +147,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 12,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -160,11 +164,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     fontFamily: 'Inter',
+    textAlign: 'center',
   },
   logoutButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     fontFamily: 'Inter',
+    textAlign: 'center',
   },
 }); 

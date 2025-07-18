@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
-export default function RecipeCard({ recipe, onPress, onEdit, isOwner = false }) {
+export default function RecipeCard({ recipe, onPress, onEdit, onDelete, isOwner = false, editDisabled = false }) {
   // Obtener rating promedio de diferentes posibles campos del backend
   const getRating = () => {
     const rating = recipe.averageRating || recipe.rating || recipe.stats?.averageRating || 0;
@@ -52,16 +52,51 @@ export default function RecipeCard({ recipe, onPress, onEdit, isOwner = false })
     }
   };
 
+  const handleDeletePress = (e) => {
+    e.stopPropagation();
+    console.log('Tacho de basura presionado', recipe.id);
+    if (typeof onDelete === 'function') {
+      onDelete(recipe);
+    }
+  };
+
   return (
     <TouchableOpacity style={styles.card} onPress={onPress}>
       <View style={styles.imageContainer}>
         <Image source={imageError ? require('../assets/hamburguesa.png') : getRecipeImage()} style={styles.image} onError={() => setImageError(true)} />
         {isOwner && (
-          <TouchableOpacity style={styles.editButton} onPress={handleEditPress}>
-            <Ionicons name="pencil" size={16} color="#fff" />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity style={[styles.editButton, editDisabled && { opacity: 0.5 }]} onPress={handleEditPress} disabled={editDisabled}>
+              <Ionicons name="pencil" size={16} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.deleteButton, (recipe.status === 'pending' || recipe.status === 'pending_delete') && { opacity: 0.5 }]}
+              onPress={handleDeletePress}
+              disabled={recipe.status === 'pending' || recipe.status === 'pending_delete'}
+            >
+              <Ionicons name="trash" size={16} color="#fff" />
+            </TouchableOpacity>
+          </>
         )}
-      </View>
+          </View>
+      {/* Badge de estado debajo de la imagen */}
+      {(recipe.status === 'pending' || recipe.status === 'pending_delete' || recipe.status === 'rejected' || recipe.status === 'approved') && (
+        <View style={[
+          styles.statusBadge,
+          recipe.status === 'pending' && { backgroundColor: '#f59e42' },
+          recipe.status === 'pending_delete' && { backgroundColor: '#ef4444' },
+          recipe.status === 'rejected' && { backgroundColor: '#9ca3af' },
+          recipe.status === 'approved' && { backgroundColor: '#22c55e' },
+          { alignSelf: 'center', marginTop: 6, position: 'relative', top: 0, left: 0, right: 0 }
+        ]}>
+          <Text style={[styles.statusBadgeText, { fontSize: 12 }]}> 
+            {recipe.status === 'pending' && 'Edición pendiente'}
+            {recipe.status === 'pending_delete' && 'Eliminación pendiente'}
+            {recipe.status === 'rejected' && 'Rechazada'}
+            {recipe.status === 'approved' && 'Aprobada'}
+          </Text>
+          </View>
+        )}
       <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
         {recipe.title || 'Sin título'}
       </Text>
@@ -128,6 +163,22 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
+  deleteButton: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    backgroundColor: 'rgba(239, 68, 68, 0.85)',
+    borderRadius: 16,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
   title: {
     fontWeight: 'bold',
     marginTop: 6,
@@ -157,5 +208,22 @@ const styles = StyleSheet.create({
     color: '#E2773C',
     fontWeight: 'bold',
     fontFamily: 'Inter',
+  },
+  statusBadge: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    zIndex: 10,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

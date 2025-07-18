@@ -48,10 +48,12 @@ export default function PublicProfileScreen() {
     }, [viewerId, paramUserId])
   );
 
+  const API_BASE_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
+
   const fetchUserData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_CONFIG.BASE_URL}/users/${paramUserId}`);
+      const res = await fetch(`${API_BASE_URL}/users/${paramUserId}`);
       const data = await res.json();
       if (data.success) {
         setUserData(data.data);
@@ -68,7 +70,7 @@ export default function PublicProfileScreen() {
   const fetchUserRecipes = async () => {
     setRecipesLoading(true);
     try {
-      const res = await fetch(`${API_CONFIG.BASE_URL}/recipes/user/${paramUserId}`);
+      const res = await fetch(`${API_BASE_URL}/recipes/user/${paramUserId}`);
       const data = await res.json();
       if (data.success) {
         setUserRecipes(data.data || []);
@@ -84,7 +86,7 @@ export default function PublicProfileScreen() {
 
   const fetchUserStats = async () => {
     try {
-      const res = await fetch(`${API_CONFIG.BASE_URL}/users/${paramUserId}/stats`);
+      const res = await fetch(`${API_BASE_URL}/users/${paramUserId}/stats`);
       const data = await res.json();
       if (data.success) {
         setUserStats(data.data);
@@ -99,7 +101,7 @@ export default function PublicProfileScreen() {
   const checkFollowing = async () => {
     if (!viewerId || !paramUserId) return;
     try {
-      const res = await fetch(`${API_CONFIG.BASE_URL}/follows/${viewerId}/following`);
+      const res = await fetch(`${API_BASE_URL}/follows/${viewerId}/following`);
       if (res.ok) {
         const data = await res.json();
         const followingArr = Array.isArray(data.data?.following) ? data.data.following : [];
@@ -121,14 +123,14 @@ export default function PublicProfileScreen() {
       let res;
       if (isFollowing) {
         // Unfollow: DELETE con body
-        res = await fetch(`${API_CONFIG.BASE_URL}/follows/${viewerId}/unfollow`, {
+        res = await fetch(`${API_BASE_URL}/follows/${viewerId}/unfollow`, {
           method: 'DELETE',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ followingId: paramUserId }),
         });
       } else {
         // Follow: POST con body
-        res = await fetch(`${API_CONFIG.BASE_URL}/follows/${viewerId}/follow`, {
+        res = await fetch(`${API_BASE_URL}/follows/${viewerId}/follow`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ followingId: paramUserId }),

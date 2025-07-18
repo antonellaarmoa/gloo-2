@@ -15,12 +15,13 @@ import { Feather } from '@expo/vector-icons';
 import RecipeCard from '../../components/RecipeCard';
 import MenuModal from '../../components/MenuModal';
 import ShareProfileModal from '../../components/ShareProfileModal';
+import { API_URLS } from '../../config/api';
 
 const { width } = Dimensions.get('window');
 
 export default function Profile() {
   const router = useRouter();
-  const { userId, user, isSignedIn } = useAuth();
+  const { userId, user, isSignedIn, getToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [menuVisible, setMenuVisible] = useState(false);
   const [shareModalVisible, setShareModalVisible] = useState(false);
@@ -31,218 +32,193 @@ export default function Profile() {
   const [userData, setUserData] = useState(null);
 
   useEffect(() => {
-    if (isSignedIn && userId) {
-      console.log('DEBUG - Loading profile for userId:', userId);
-      
-      // Usar datos de Clerk inmediatamente
-      setUserData({
-        firstName: user?.firstName || '',
-        lastName: user?.lastName || '',
-        username: user?.username || '',
-        description: user?.publicMetadata?.bio || '',
-        imageUrl: user?.imageUrl || null,
-      });
-      
-      setUserStats({ recipes: 0, followers: 0, following: 0 });
-      setUserRecipes([]);
-      setLoading(false);
-    }
+    const fetchProfileData = async () => {
+      if (isSignedIn && userId) {
+        setLoading(true);
+        try {
+          // 1. Datos de usuario de Clerk
+          setUserData({
+            firstName: user?.firstName || '',
+            lastName: user?.lastName || '',
+            username: user?.username || '',
+            description: user?.publicMetadata?.bio || '',
+            imageUrl: user?.imageUrl || null,
+          });
+
+          // Obtener token de Clerk
+          const token = await getToken();
+          const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+
+          // 2. Recetas del usuario
+          let recipes = [];
+          try {
+            const res = await fetch(`${API_URLS.RECIPES.BY_USER(userId)}`, { headers: { ...authHeaders } });
+            const data = await res.json();
+            if (data.success && Array.isArray(data.data)) {
+              recipes = data.data;
+            } else if (Array.isArray(data)) {
+              recipes = data;
+            } else if (data.data && Array.isArray(data.data.data)) {
+              recipes = data.data.data;
+            }
+          } catch {}
+          setUserRecipes(recipes);
+
+          // 3. Stats del usuario (recetas, followers, following)
+          let stats = { recipes: recipes.length, followers: 0, following: 0 };
+          try {
+            const res = await fetch(`${API_URLS.USERS.STATS(userId)}`, { headers: { ...authHeaders } });
+            const data = await res.json();
+            if (data.success && data.data) {
+              stats = {
+                recipes: recipes.length,
+                followers: data.data.followers || 0,
+                following: data.data.following || 0,
+              };
+            }
+          } catch {}
+          setUserStats(stats);
+        } finally {
+          setLoading(false);
+        }
+      }
+    };
+    fetchProfileData();
   }, [isSignedIn, userId, user]);
 
   return (
-  <View style={styles.container}>
-    {loading ? (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
-        <ActivityIndicator size="large" color="#E2773C" />
-        <Text style={{ marginTop: 16, color: '#666' }}>Cargando perfil...</Text>
-      </View>
-    ) : (
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ...resto del contenido del perfil... */}
-      </ScrollView>
-    )}
-  </View>
-);
-
-  const handleFollowingPress = () => {
-    router.push('/following');
-  };
-
-  const handleFollowersPress = () => {
-    router.push('/followers');
-  };
-
-  const handleEditProfilePress = () => {
-    router.push('/edit-profile');
-  };
-
-  const handleAccountDetailsPress = () => {
-    router.push('/account-details');
-  };
-
-  const getUserDisplayName = () => {
-    if (userData?.firstName && userData.firstName !== 'undefined' && userData.firstName !== 'null') {
-      return userData.firstName;
-    }
-    if (user?.firstName && user.firstName !== 'undefined') {
-      return user.firstName;
-    }
-    
-    const email = user?.primaryEmailAddress?.emailAddress;
-    if (email) {
-      const emailName = email.split('@')[0];
-      return emailName.charAt(0).toUpperCase() + emailName.slice(1);
-    }
-    
-    return 'Usuario';
-  };
-
-  const getUserUsername = () => {
-    const username = userData?.username || user?.username;
-    if (username && username !== 'undefined' && username !== 'null') {
-      return username.startsWith('@') ? username : `@${username}`;
-    }
-    return `@${user?.id?.slice(0, 8)}`;
-  };
-
-  const getUserBio = () => {
-    return userData?.description || user?.publicMetadata?.bio || "¡Comparte tus mejores recetas!";
-  };
-
-  const getUserProfileImage = () => {
-    if (userData?.imageUrl) {
-      return { uri: userData.imageUrl };
-    }
-    return require('../../assets/user.jpeg');
-  };
-
-  return (
     <View style={styles.container}>
-      <ScrollView 
-        contentContainerStyle={styles.scrollContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-          <Feather name="menu" size={20} color="white" />
-        </TouchableOpacity>
-        <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
-        
-        <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
-          <Image source={getUserProfileImage()} style={styles.avatar} />
-        </TouchableOpacity>
-        
-        <Text style={styles.name}>{getUserDisplayName()}</Text>
-        <Text style={styles.username}>{getUserUsername()}</Text>
-        <Text style={styles.bio}>{getUserBio()}</Text>
-        
-        <View style={styles.statsContainer}>
-          <TouchableOpacity 
-            style={styles.statBox} 
-            onPress={() => setActiveTab('My Recipes')}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.statNumber}>{userStats.recipes}</Text>
-            <Text style={styles.statLabel}>Recetas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.statBox} 
-            onPress={handleFollowingPress}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.statNumber}>{userStats.following}</Text>
-            <Text style={styles.statLabel}>Siguiendo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.statBox} 
-            onPress={handleFollowersPress}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.statNumber}>{userStats.followers}</Text>
-            <Text style={styles.statLabel}>Seguidores</Text>
-          </TouchableOpacity>
+      {loading ? (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
+          <ActivityIndicator size="large" color="#E2773C" />
+          <Text style={{ marginTop: 16, color: '#666' }}>Cargando perfil...</Text>
         </View>
-        
-        <View style={styles.buttonsContainer}>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.orangeButton]}
-            onPress={handleEditProfilePress}
-          >
-            <Text style={styles.actionButtonText}>Editar Perfil</Text>
+      ) : (
+        <ScrollView 
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+            <Feather name="menu" size={20} color="white" />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.shareButton]}
-            onPress={() => setShareModalVisible(true)}
-          >
-            <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
+          <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+          
+          <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
+            <Image source={getUserProfileImage()} style={styles.avatar} />
           </TouchableOpacity>
-        </View>
-        
-        <View style={styles.tabsContainer}>
-          {['My Recipes', 'Favorites', 'Changed'].map(tab => (
-            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabButton}>
-              <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+          
+          <Text style={styles.name}>{getUserDisplayName()}</Text>
+          <Text style={styles.username}>{getUserUsername()}</Text>
+          <Text style={styles.bio}>{getUserBio()}</Text>
+          
+          <View style={styles.statsContainer}>
+            <TouchableOpacity 
+              style={styles.statBox} 
+              onPress={() => setActiveTab('My Recipes')}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNumber}>{userStats.recipes}</Text>
+              <Text style={styles.statLabel}>Recetas</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-        
-        {activeTab === 'My Recipes' && (
-          <View style={styles.recipesContainer}>
-            {userRecipes.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
-                <Text style={styles.emptyStateSubtext}>¡Crea tu primera receta y compártela!</Text>
-                <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} onPress={() => router.push('/(tabs)/create-recipe')}>
-                  <Text style={styles.actionButtonText}>Crear Receta</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.recipesGrid}>
-                {userRecipes.slice(0, 5).map((recipe, idx) => (
-                  <View key={recipe.id || idx} style={styles.recipeCard}>
-                    <RecipeCard 
-                      recipe={{
-                        title: recipe.title,
-                        description: recipe.description || 'Sin descripción',
-                        image: recipe.imageUrl ? { uri: recipe.imageUrl } : 
-                               recipe.image ? { uri: recipe.image } : 
-                               require('../../assets/hamburguesa.png'),
-                        averageRating: recipe.averageRating,
-                        cookingTime: recipe.cookingTime,
-                      }} 
-                    />
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-        )}
-        
-        {activeTab === 'Favorites' && (
-          <View style={styles.favoritesContainer}>
-            <View style={styles.favoriteCard}>
-              <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            </View>
-            <View style={styles.favoriteCard}>
-              <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            </View>
-            <View style={styles.favoriteCard}>
-              <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
-            </View>
-            <TouchableOpacity style={styles.createButton}>
-              <Text style={styles.createButtonText}>+ Crear Colección</Text>
+            <TouchableOpacity 
+              style={styles.statBox} 
+              onPress={handleFollowingPress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNumber}>{userStats.following}</Text>
+              <Text style={styles.statLabel}>Siguiendo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.statBox} 
+              onPress={handleFollowersPress}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.statNumber}>{userStats.followers}</Text>
+              <Text style={styles.statLabel}>Seguidores</Text>
             </TouchableOpacity>
           </View>
-        )}
-        
-        {activeTab === 'Changed' && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>Las recetas modificadas aparecerán aquí</Text>
+          
+          <View style={styles.buttonsContainer}>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.orangeButton]}
+              onPress={handleEditProfilePress}
+            >
+              <Text style={styles.actionButtonText}>Editar Perfil</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.actionButton, styles.shareButton]}
+              onPress={() => setShareModalVisible(true)}
+            >
+              <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
+            </TouchableOpacity>
           </View>
-        )}
-      </ScrollView>
+          
+          <View style={styles.tabsContainer}>
+            {['My Recipes', 'Favorites', 'Changed'].map(tab => (
+              <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabButton}>
+                <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          
+          {activeTab === 'My Recipes' && (
+            <View style={styles.recipesContainer}>
+              {userRecipes.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
+                  <Text style={styles.emptyStateSubtext}>¡Crea tu primera receta y compártela!</Text>
+                  <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} onPress={() => router.push('/(tabs)/create-recipe')}>
+                    <Text style={styles.actionButtonText}>Crear Receta</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.recipesGrid}>
+                  {userRecipes.slice(0, 5).map((recipe, idx) => (
+                    <View key={recipe.id || idx} style={styles.recipeCard}>
+                      <RecipeCard 
+                        recipe={{
+                          title: recipe.title,
+                          description: recipe.description || 'Sin descripción',
+                          image: recipe.imageUrl && typeof recipe.imageUrl === 'string' ? recipe.imageUrl : (recipe.image && typeof recipe.image === 'string' ? recipe.image : undefined),
+                          averageRating: recipe.averageRating ?? recipe.rating ?? recipe.stats?.averageRating ?? 4.2,
+                          likes: recipe.likes ?? recipe.stats?.likes ?? 0,
+                          estimatedTime: recipe.estimatedTime ?? recipe.cookingTime ?? recipe.duration ?? 20,
+                          comments: recipe.comments ?? recipe.stats?.comments ?? 0,
+                        }}
+                        onPress={() => router.push({ pathname: '/(tabs)/recipe', params: { id: recipe.id } })}
+                        isOwner={true}
+                      />
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          )}
+          
+          {activeTab === 'Favorites' && (
+            <View style={styles.favoritesContainer}>
+              <View style={styles.favoriteCard}>
+                <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              </View>
+              <View style={styles.favoriteCard}>
+                <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              </View>
+              <View style={styles.favoriteCard}>
+                <Image source={require('../../assets/hamburguesa.png')} style={styles.favoriteImage} />
+              </View>
+              <TouchableOpacity style={styles.createButton}>
+                <Text style={styles.createButtonText}>+ Crear Colección</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          
+          {activeTab === 'Changed' && (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>Las recetas modificadas aparecerán aquí</Text>
+            </View>
+          )}
+        </ScrollView>
+      )}
       
       <ShareProfileModal
         visible={shareModalVisible}
