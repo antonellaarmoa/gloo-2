@@ -74,6 +74,7 @@ export default function SearchScreen() {
   const [savedRecipes, setSavedRecipes] = useState({});
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [isGuest, setIsGuest] = useState(false);
+  const [searchTimeout, setSearchTimeout] = useState(null);
 
   useEffect(() => {
     fetchSuggestions();
@@ -107,8 +108,14 @@ export default function SearchScreen() {
     loadSaved();
     // Escuchar cambios globales
     global.refreshProfileFavorites = loadSaved;
-    return () => { global.refreshProfileFavorites = undefined; };
-  }, [isSignedIn, userId]);
+    return () => { 
+      global.refreshProfileFavorites = undefined;
+      // Limpiar timeout al desmontar
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+    };
+  }, [isSignedIn, userId, searchTimeout]);
 
   // Detectar si el usuario es invitado
   useEffect(() => {
@@ -168,330 +175,184 @@ export default function SearchScreen() {
         return;
       }
 
-      // Crear múltiples estrategias de búsqueda para mayor flexibilidad
-      const searchTerms = search.trim().toLowerCase().split(/\s+/).filter(term => term.length > 0);
-      let allResults = [];
-      
-      // Estrategia 1: Búsqueda exacta
+      // Construir URL de búsqueda optimizada
       let searchUrl = `${API_URL}/search?query=${encodeURIComponent(search.trim())}&sortBy=${sortBy}&limit=50`;
+      
+      // Agregar filtros al backend
       if (selectedCategory && !isNaN(parseInt(selectedCategory))) {
         searchUrl += `&categoryId=${parseInt(selectedCategory)}`;
       }
       
-      try {
-        const exactRes = await fetch(searchUrl);
-        if (exactRes.ok) {
-          const exactData = await exactRes.json();
-          if (exactData.success && exactData.data) {
-            allResults.push(...exactData.data);
-          }
-        }
-      } catch (e) {
-        console.error('Error en búsqueda exacta:', e);
+      if (duration && duration < 120) {
+        searchUrl += `&maxDuration=${duration}`;
       }
       
-      // Estrategia 2: Búsqueda por palabras individuales (más flexible)
-      if (searchTerms.length > 1) {
-        for (const term of searchTerms) {
-          if (term.length >= 3) { // Solo términos de 3+ caracteres
-            try {
-              let termUrl = `${API_URL}/search?query=${encodeURIComponent(term)}&sortBy=${sortBy}&limit=30`;
-              if (selectedCategory && !isNaN(parseInt(selectedCategory))) {
-                termUrl += `&categoryId=${parseInt(selectedCategory)}`;
-              }
-              
-              const termRes = await fetch(termUrl);
-              if (termRes.ok) {
-                const termData = await termRes.json();
-                if (termData.success && termData.data) {
-                  allResults.push(...termData.data);
-                }
-              }
-            } catch (e) {
-              console.error('Error en búsqueda por término:', e);
-            }
-          }
-        }
+      if (excludedIngredients.length > 0) {
+        searchUrl += `&excludeIngredients=${excludedIngredients.join(',')}`;
       }
       
-      // Estrategia 3: Búsqueda por términos similares (para nombres de usuario)
-      const enhancedTerms = enhanceUserSearch(search.trim());
-      const similarTerms = enhancedTerms.filter(term => !searchTerms.includes(term));
+      console.log('🔍 Buscando con URL:', searchUrl);
       
-      // Buscar con términos similares
-      for (const similarTerm of similarTerms.slice(0, 3)) { // Limitar a 3 términos similares
-        try {
-          let similarUrl = `${API_URL}/search?query=${encodeURIComponent(similarTerm)}&sortBy=${sortBy}&limit=20`;
-          if (selectedCategory && !isNaN(parseInt(selectedCategory))) {
-            similarUrl += `&categoryId=${parseInt(selectedCategory)}`;
-          }
-          
-          const similarRes = await fetch(similarUrl);
-          if (similarRes.ok) {
-            const similarData = await similarRes.json();
-            if (similarData.success && similarData.data) {
-              allResults.push(...similarData.data);
-            }
-          }
-        } catch (e) {
-          console.error('Error en búsqueda similar:', e);
-        }
+      const response = await fetch(searchUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
-      // Estrategia 4: Búsqueda específica para usuarios (más agresiva)
-      if (activeTab === 'users' || searchTerms.some(term => 
-        ['chef', 'cocinero', 'cook', 'baker', 'pastelero', 'facu', 'user', 'usuario'].includes(term.toLowerCase())
-      )) {
-        // Buscar términos específicos de usuario
-        const userSpecificTerms = ['chef', 'cocinero', 'cook', 'baker', 'pastelero', 'facu', 'user', 'usuario'];
-        const relevantTerms = userSpecificTerms.filter(term => 
-          searchTerms.some(searchTerm => 
-            searchTerm.toLowerCase().includes(term) || term.includes(searchTerm.toLowerCase())
-          )
-        );
-        
-        for (const userTerm of relevantTerms) {
-          try {
-            let userUrl = `${API_URL}/search?query=${encodeURIComponent(userTerm)}&sortBy=${sortBy}&limit=30`;
-            const userRes = await fetch(userUrl);
-            if (userRes.ok) {
-              const userData = await userRes.json();
-              if (userData.success && userData.data) {
-                allResults.push(...userData.data);
-              }
-            }
-          } catch (e) {
-            console.error('Error en búsqueda de usuario específico:', e);
-          }
-        }
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || 'Error en la búsqueda');
       }
       
-      // Estrategia 5: Búsqueda por nombres de usuario conocidos
-      const knownUsernames = ['facupotti_', 'anto-frutilla', 'niky-cocina', 'adrian', 'facu_thechef'];
-      const matchingUsernames = knownUsernames.filter(username => 
-        searchTerms.some(term => 
-          username.toLowerCase().includes(term.toLowerCase()) || 
-          term.toLowerCase().includes(username.toLowerCase())
-        )
+      let allResults = data.data || [];
+      console.log('📊 Resultados encontrados:', allResults.length);
+      
+      // Filtrar recetas modificadas en el frontend
+      allResults = allResults.filter(recipe => 
+        !recipe.title.toLowerCase().includes('modificada')
       );
       
-      if (matchingUsernames.length > 0) {
-        console.log('🔍 Buscando por nombres de usuario conocidos:', matchingUsernames);
-        
-        // Buscar recetas de estos usuarios usando términos genéricos y específicos
-        const genericTerms = ['receta', 'comida', 'cooking', 'food', 'chef', 'cocinero', 'postre', 'dessert'];
-        
-        // Términos específicos para usuarios particulares
-        const specificTerms = {
-          'facu_thechef': ['tacos', 'quinoa', 'pollo', 'salmon', 'bowl'],
-          'facupotti_': ['receta', 'pasta', 'pastafrola', 'ñoquis'],
-          'anto-frutilla': ['empanada', 'asado', 'argentino'],
-          'niky-cocina': ['tiramisu', 'risotto', 'champiñones'],
-          'adrian': ['coq', 'vin', 'souffle', 'queso']
-        };
-        
-        // Combinar términos genéricos con específicos
-        let allSearchTerms = [...genericTerms];
-        matchingUsernames.forEach(username => {
-          if (specificTerms[username]) {
-            allSearchTerms.push(...specificTerms[username]);
+      // Remover duplicados por ID
+      const uniqueRecipes = [];
+      const seenIds = new Set();
+      
+      allResults.forEach(recipe => {
+        if (!seenIds.has(recipe.id)) {
+          seenIds.add(recipe.id);
+          uniqueRecipes.push(recipe);
+        }
+      });
+      
+      console.log('✅ Recetas únicas:', uniqueRecipes.length);
+      
+      // Organizar resultados según la pestaña activa
+      if (activeTab === 'users') {
+        // Agrupar por usuario
+        const userGroups = {};
+        uniqueRecipes.forEach(recipe => {
+          const userId = recipe.userId;
+          if (!userGroups[userId]) {
+            userGroups[userId] = {
+              externalId: userId,
+              clerkUserData: recipe.user,
+              recipes: []
+            };
           }
+          userGroups[userId].recipes.push(recipe);
         });
         
-        // Eliminar duplicados
-        allSearchTerms = [...new Set(allSearchTerms)];
-        
-        for (const searchTerm of allSearchTerms) {
-          try {
-            let searchUrl = `${API_URL}/search?query=${encodeURIComponent(searchTerm)}&sortBy=${sortBy}&limit=50`;
-            const searchRes = await fetch(searchUrl);
-            if (searchRes.ok) {
-              const searchData = await searchRes.json();
-              if (searchData.success && searchData.data) {
-                // Filtrar solo recetas de los usuarios que coinciden
-                const filteredRecipes = searchData.data.filter(recipe => 
-                  matchingUsernames.some(username => 
-                    recipe.user?.username === username
-                  )
-                );
-                if (filteredRecipes.length > 0) {
-                  console.log(`   📝 "${searchTerm}": ${filteredRecipes.length} recetas filtradas para ${matchingUsernames.join(', ')}`);
-                }
-                allResults.push(...filteredRecipes);
-              }
-            }
-          } catch (e) {
-            console.error('Error en búsqueda específica para usuarios:', e);
-          }
-        }
-      }
-      
-      console.log('Búsquedas completadas, procesando resultados...');
-      console.log('Total de resultados encontrados:', allResults.length);
-      
-      // Procesar y combinar todos los resultados
-      if (allResults.length > 0) {
-        // Procesar resultados de búsqueda
-        let filteredResults = allResults;
-        
-        // Filtrar por duración en el frontend si es necesario
-        if (duration && duration < 120) {
-          filteredResults = filteredResults.filter(recipe => 
-            (recipe.estimatedTime || 30) <= duration
-          );
-        }
-        
-        // Filtrar solo recetas originales (no contienen "Modificada" en el título)
-        filteredResults = filteredResults.filter(recipe => 
-          !recipe.title.toLowerCase().includes('modificada')
+        // Ordenar usuarios por número de recetas
+        const userResults = Object.values(userGroups).sort((a, b) => 
+          b.recipes.length - a.recipes.length
         );
         
-        // Filtrar por ingredientes excluidos en el frontend
-        if (excludedIngredients.length > 0) {
-          filteredResults = filteredResults.filter(recipe => {
-            // Normalizar ingredientes a array de strings
-            let recipeIngredients = [];
-            if (Array.isArray(recipe.ingredients)) {
-              if (typeof recipe.ingredients[0] === 'object' && recipe.ingredients[0]?.name) {
-                recipeIngredients = recipe.ingredients.map(ing => ing.name.toLowerCase());
-              } else {
-                recipeIngredients = recipe.ingredients.map(ing => ing.toLowerCase());
-              }
-            } else if (typeof recipe.ingredients === 'string') {
-              recipeIngredients = recipe.ingredients.split(',').map(ing => ing.trim().toLowerCase());
-            }
-            // Si no hay ingredientes, no excluir
-            if (!recipeIngredients.length) return true;
-            // Si alguno de los ingredientes excluidos está presente, excluir la receta
-            return !excludedIngredients.some(exIng => recipeIngredients.includes(exIng.toLowerCase()));
-          });
-        }
-        
-        // Remover duplicados y ordenar por relevancia
-        const uniqueRecipes = [];
-        const seenIds = new Set();
-        const seenTitles = new Set();
-        
-        // Primero agregar resultados exactos
-        filteredResults.forEach(recipe => {
-          if (!seenIds.has(recipe.id)) {
-            seenIds.add(recipe.id);
-            const baseTitle = recipe.title.toLowerCase().replace(/\s*\([^)]*\)/g, '').trim();
-            if (!seenTitles.has(baseTitle)) {
-              seenTitles.add(baseTitle);
-              uniqueRecipes.push({ ...recipe, relevance: 'exact' });
-            }
-          }
-        });
-        
-        // Ordenar por relevancia: exactos primero, luego similares
-        uniqueRecipes.sort((a, b) => {
-          if (a.relevance === 'exact' && b.relevance !== 'exact') return -1;
-          if (a.relevance !== 'exact' && b.relevance === 'exact') return 1;
-          return 0;
-        });
-        
-        console.log('Recetas encontradas:', uniqueRecipes.length);
-        
-        // Organizar resultados según la pestaña activa
-        if (activeTab === 'users') {
-          // Para la pestaña de usuarios, mostrar recetas agrupadas por usuario
-          const userGroups = {};
-          uniqueRecipes.forEach(recipe => {
-            const userId = recipe.userId;
-            if (!userGroups[userId]) {
-              userGroups[userId] = {
-                externalId: userId,
-                clerkUserData: recipe.user,
-                recipes: []
-              };
-            }
-            userGroups[userId].recipes.push(recipe);
-          });
-          
-          // Ordenar usuarios por número de recetas y relevancia
-          const userResults = Object.values(userGroups).sort((a, b) => {
-            // Primero por número de recetas
-            if (b.recipes.length !== a.recipes.length) {
-              return b.recipes.length - a.recipes.length;
-            }
-            // Luego por nombre de usuario
-            const nameA = a.clerkUserData?.username || '';
-            const nameB = b.clerkUserData?.username || '';
-            return nameA.localeCompare(nameB);
-          });
-          
-          console.log('Usuarios encontrados:', userResults.length);
-          userResults.forEach(user => {
-            console.log(`- ${user.clerkUserData?.username || 'Usuario'}: ${user.recipes.length} recetas`);
-          });
-          
-          setUserResults(userResults);
-          setResults([]);
-          setCombinedResults([]);
-        } else if (activeTab === 'recipes') {
-          // Para la pestaña de recetas, mostrar todas las recetas
-          setResults(uniqueRecipes);
-          setUserResults([]);
-          setCombinedResults([]);
-        } else {
-          // Para la pestaña "Todo", mostrar recetas y usuarios agrupados
-          setResults(uniqueRecipes);
-          
-          // Crear lista de usuarios únicos con sus recetas
-          const userGroups = {};
-          uniqueRecipes.forEach(recipe => {
-            const userId = recipe.userId;
-            if (!userGroups[userId]) {
-              userGroups[userId] = {
-                externalId: userId,
-                clerkUserData: recipe.user,
-                recipes: []
-              };
-            }
-            userGroups[userId].recipes.push(recipe);
-          });
-          
-          const userResults = Object.values(userGroups);
-          setUserResults(userResults);
-          
-          // Crear lista combinada
-          const combined = [];
-          if (uniqueRecipes.length > 0) {
-            combined.push(...uniqueRecipes.map(recipe => ({ ...recipe, type: 'recipe' })));
-          }
-          if (userResults.length > 0) {
-            combined.push(...userResults.map(user => ({ ...user, type: 'user' })));
-          }
-          setCombinedResults(combined);
-        }
-        
-        // Guardar en historial si hay búsqueda
-        if (search.trim() && isSignedIn && userId) {
-          try {
-            await fetch(`${API_URL}/search/history/${userId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                query: search.trim(),
-                resultsCount: uniqueRecipes.length 
-              })
-            });
-          } catch (e) {
-            console.error('Error saving to history:', e);
-          }
-        }
-      } else {
-        console.log('No se encontraron resultados con búsqueda flexible');
+        setUserResults(userResults);
         setResults([]);
+        setCombinedResults([]);
+      } else if (activeTab === 'recipes') {
+        setResults(uniqueRecipes);
         setUserResults([]);
         setCombinedResults([]);
+      } else {
+        // Pestaña "Todo"
+        setResults(uniqueRecipes);
+        
+        // Crear lista de usuarios únicos
+        const userGroups = {};
+        uniqueRecipes.forEach(recipe => {
+          const userId = recipe.userId;
+          if (!userGroups[userId]) {
+            userGroups[userId] = {
+              externalId: userId,
+              clerkUserData: recipe.user,
+              recipes: []
+            };
+          }
+          userGroups[userId].recipes.push(recipe);
+        });
+        
+        const userResults = Object.values(userGroups);
+        setUserResults(userResults);
+        
+        // Crear lista combinada
+        const combined = [
+          ...uniqueRecipes.map(recipe => ({ ...recipe, type: 'recipe' })),
+          ...userResults.map(user => ({ ...user, type: 'user' }))
+        ];
+        setCombinedResults(combined);
+      }
+      
+      // Guardar en historial
+      if (search.trim() && isSignedIn && userId) {
+        try {
+          await fetch(`${API_URL}/search/history/${userId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              query: search.trim(),
+              resultsCount: uniqueRecipes.length 
+            })
+          });
+        } catch (e) {
+          console.error('Error saving to history:', e);
+        }
       }
     } catch (e) {
-      console.error('Error fetching search results:', e);
+      console.error('❌ Error fetching search results:', e);
       setResults([]);
       setUserResults([]);
       setCombinedResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Función específica para búsqueda de usuarios
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      if (!search.trim()) {
+        setUserResults([]);
+        setLoading(false);
+        return;
+      }
+
+      const searchUrl = `${API_URL}/search/users?query=${encodeURIComponent(search.trim())}&limit=50`;
+      console.log('🔍 Buscando usuarios con URL:', searchUrl);
+      
+      const response = await fetch(searchUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.message || 'Error en la búsqueda de usuarios');
+      }
+      
+      const users = data.data || [];
+      console.log('👥 Usuarios encontrados:', users.length);
+      
+      setUserResults(users);
+      setResults([]);
+      setCombinedResults([]);
+      
+    } catch (e) {
+      console.error('❌ Error fetching users:', e);
+      setUserResults([]);
     } finally {
       setLoading(false);
     }
@@ -653,85 +514,71 @@ export default function SearchScreen() {
     }
   };
 
+  // useEffect para manejar cambios en filtros (sin búsqueda automática)
   useEffect(() => {
+    // Solo ejecutar búsqueda si ya hay un término de búsqueda
     if (search.trim() !== '') {
-      fetchRecipes();
-    } else {
-      setResults([]);
-      setUserResults([]);
-      setCombinedResults([]);
+      // Limpiar timeout anterior si existe
+      if (searchTimeout) {
+        clearTimeout(searchTimeout);
+      }
+      
+      // Ejecutar búsqueda inmediatamente para filtros
+      if (activeTab === 'users') {
+        fetchUsers();
+      } else {
+        fetchRecipes();
+      }
     }
-  }, [search, selectedCategory, duration, excludedIngredients, sortBy, activeTab]);
+  }, [selectedCategory, duration, excludedIngredients, sortBy, activeTab]);
 
   const handleSearch = (text) => {
     console.log('Search text changed:', text);
     setSearch(text);
-  };
-
-  // Función para mejorar la búsqueda por nombres de usuario
-  const enhanceUserSearch = (searchText) => {
-    const terms = searchText.toLowerCase().split(/\s+/);
-    const enhancedTerms = [];
     
-    terms.forEach(term => {
-      // Agregar el término original
-      enhancedTerms.push(term);
-      
-      // Agregar variaciones comunes para nombres de usuario
-      if (term.includes('chef') || term.includes('cocinero')) {
-        enhancedTerms.push('chef', 'cocinero', 'cocina', 'cooking', 'facu_thechef');
-      }
-      if (term.includes('food') || term.includes('comida')) {
-        enhancedTerms.push('food', 'comida', 'cooking', 'receta');
-      }
-      if (term.includes('recipe') || term.includes('receta')) {
-        enhancedTerms.push('recipe', 'receta', 'cooking', 'chef');
-      }
-      if (term.includes('cook') || term.includes('cocinar')) {
-        enhancedTerms.push('cook', 'cocinar', 'chef', 'cooking');
-      }
-      if (term.includes('baker') || term.includes('panadero')) {
-        enhancedTerms.push('baker', 'panadero', 'postre', 'dessert');
-      }
-      if (term.includes('pastry') || term.includes('pastelero')) {
-        enhancedTerms.push('pastry', 'pastelero', 'postre', 'dessert');
-      }
-      if (term.includes('vegan') || term.includes('vegano')) {
-        enhancedTerms.push('vegan', 'vegano', 'vegetariano', 'vegetal');
-      }
-      if (term.includes('vegetarian') || term.includes('vegetariano')) {
-        enhancedTerms.push('vegetarian', 'vegetariano', 'vegano', 'vegetal');
-      }
-      if (term.includes('facu') || term.includes('facundo')) {
-        enhancedTerms.push('facu', 'facundo', 'facu_thechef', 'chef');
-      }
-      if (term.includes('adrian') || term.includes('adri')) {
-        enhancedTerms.push('adrian', 'adri', 'cocinero');
-      }
-      if (term.includes('user') || term.includes('usuario')) {
-        enhancedTerms.push('user', 'usuario', 'chef', 'cocinero');
-      }
-      if (term.includes('facu') || term.includes('facundo') || term.includes('potti') || term.includes('thechef')) {
-        enhancedTerms.push('facu', 'facundo', 'potti', 'facupotti_', 'facu_thechef', 'receta', 'tacos');
-      }
-      if (term.includes('anto') || term.includes('frutilla')) {
-        enhancedTerms.push('anto', 'frutilla', 'anto-frutilla', 'empanada', 'asado');
-      }
-      if (term.includes('niky') || term.includes('zieman')) {
-        enhancedTerms.push('niky', 'zieman', 'niky-cocina', 'tiramisu', 'risotto');
-      }
-      if (term.includes('adrian') || term.includes('narducci')) {
-        enhancedTerms.push('adrian', 'narducci', 'coq', 'vin', 'souffle');
-      }
-    });
+    // Limpiar timeout anterior
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
     
-    return [...new Set(enhancedTerms)]; // Eliminar duplicados
+    // Si el texto está vacío, limpiar resultados inmediatamente
+    if (!text.trim()) {
+      setResults([]);
+      setUserResults([]);
+      setCombinedResults([]);
+      setLoading(false);
+      return;
+    }
+    
+    // Debounce de 300ms para búsquedas (más rápido)
+    const newTimeout = setTimeout(() => {
+      if (text.trim()) {
+        console.log('Executing search for:', text, 'Active tab:', activeTab);
+        if (activeTab === 'users') {
+          fetchUsers();
+        } else {
+          fetchRecipes();
+        }
+      }
+    }, 300);
+    
+    setSearchTimeout(newTimeout);
   };
   
   const handleSubmitSearch = () => {
-    console.log('Submitting search:', search);
+    console.log('Submitting search:', search, 'Active tab:', activeTab);
     if (search.trim() === '') return;
-    fetchRecipes();
+    
+    // Limpiar timeout si existe
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+    
+    if (activeTab === 'users') {
+      fetchUsers();
+    } else {
+      fetchRecipes();
+    }
   };
   
   const handleDeleteHistoryItem = async (item) => {
@@ -971,40 +818,18 @@ export default function SearchScreen() {
     }
   };
 
-  // Funciones para calcular los contadores correctos de cada pestaña
+  // Funciones optimizadas para calcular contadores
   const getRecipesCount = () => {
-    // Si estamos en la pestaña de recetas o todo, usar el array actual
-    if (activeTab === 'recipes' || activeTab === 'all') {
-      return results.length;
-    }
-    // Si estamos en usuarios, calcular cuántas recetas hay en total
-    // basándonos en los usuarios encontrados
-    let totalRecipes = 0;
-    userResults.forEach(user => {
-      if (user.recipes && Array.isArray(user.recipes)) {
-        totalRecipes += user.recipes.length;
-      }
-    });
-    return totalRecipes;
+    if (activeTab === 'users') return 0;
+    return results.length;
   };
 
   const getUsersCount = () => {
-    // Si estamos en la pestaña de usuarios o todo, usar el array actual
-    if (activeTab === 'users' || activeTab === 'all') {
-      return userResults.length;
-    }
-    // Si estamos en recetas, contar usuarios únicos de las recetas
-    const uniqueUsers = new Set();
-    results.forEach(recipe => {
-      if (recipe.user && recipe.user.id) {
-        uniqueUsers.add(recipe.user.id);
-      }
-    });
-    return uniqueUsers.size;
+    if (activeTab === 'recipes') return 0;
+    return userResults.length;
   };
 
   const getAllResultsCount = () => {
-    // Para "Todo" siempre mostrar la suma de recetas y usuarios
     return getRecipesCount() + getUsersCount();
   };
 
@@ -1047,11 +872,14 @@ export default function SearchScreen() {
         <Image source={getUserImage()} style={styles.userImage} />
         <View style={styles.userInfo}>
           <Text style={styles.userName}>{getUserDisplayName()}</Text>
-          {getUserDescription() && (
-            <Text style={styles.userDescription} numberOfLines={2}>
-              {getUserDescription()}
-            </Text>
-          )}
+          {(() => {
+            const description = getUserDescription();
+            return description ? (
+              <Text style={styles.userDescription} numberOfLines={2}>
+                {description}
+              </Text>
+            ) : null;
+          })()}
           {item.recipes && item.recipes.length > 0 && (
             <Text style={styles.userRecipesCount}>
               {item.recipes.length} receta{item.recipes.length !== 1 ? 's' : ''}
@@ -1164,7 +992,7 @@ export default function SearchScreen() {
       {loading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#E2773C" />
-          <Text style={styles.loadingText}>Buscando...</Text>
+          <Text style={styles.loadingText}>Buscando "{search}"...</Text>
         </View>
       )}
 
@@ -1195,6 +1023,18 @@ export default function SearchScreen() {
               Usuarios ({getUsersCount()})
             </Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Indicador de resultados */}
+      {search.length > 0 && !loading && (
+        <View style={styles.resultsIndicator}>
+          <Text style={styles.resultsText}>
+            {getAllResultsCount() > 0 
+              ? `${getAllResultsCount()} resultado${getAllResultsCount() !== 1 ? 's' : ''} para "${search}"`
+              : `No se encontraron resultados para "${search}"`
+            }
+          </Text>
         </View>
       )}
 
@@ -1273,7 +1113,11 @@ export default function SearchScreen() {
           columnWrapperStyle={null}
           ListEmptyComponent={
             !loading && (
-              <Text style={styles.suggestionTitle}>No se encontraron resultados</Text>
+              <View style={styles.emptyContainer}>
+                <Ionicons name="search-outline" size={48} color="#ccc" />
+                <Text style={styles.emptyText}>No se encontraron resultados</Text>
+                <Text style={styles.emptySubtext}>Intenta con otros términos de búsqueda</Text>
+              </View>
             )
           }
           key={activeTab + '-list'}
@@ -2227,5 +2071,18 @@ const styles = StyleSheet.create({
     color: '#E2773C',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  // Estilos para el indicador de resultados
+  resultsIndicator: {
+    backgroundColor: '#f8f9fa',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  resultsText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
 });
