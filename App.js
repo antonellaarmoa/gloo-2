@@ -1,9 +1,11 @@
 import { ClerkProvider } from '@clerk/clerk-expo';
 import { Slot } from 'expo-router';
 import NetInfo from '@react-native-community/netinfo';
-import { Modal, View, Text, Image, StyleSheet } from 'react-native';
+import { Modal, View, Text, Image, StyleSheet, LogBox } from 'react-native';
 import React from 'react';
 import { AdminHistoryProvider } from './context/AdminHistoryContext';
+
+LogBox.ignoreLogs(['Accessing element.ref was removed in React 19']);
 
 export default function App() {
   const [isOffline, setIsOffline] = React.useState(false);

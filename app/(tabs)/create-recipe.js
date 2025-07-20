@@ -26,6 +26,7 @@ import { API_URLS } from '../../config/api';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { Video } from 'expo-av';
+import * as DocumentPicker from 'expo-document-picker';
 
 // Función robusta para hacer peticiones a la API
 const makeApiRequest = async (url, options = {}) => {
@@ -85,6 +86,9 @@ export default function CreateRecipeScreen() {
   const [userRecipes, setUserRecipes] = useState([]);
   // Guardar el ID de la receta a eliminar si el usuario elige reemplazar
   const [replaceRecipeId, setReplaceRecipeId] = useState(null);
+  const [showVideoSizeModal, setShowVideoSizeModal] = useState(false);
+  const [localVideoUri, setLocalVideoUri] = useState(null);
+  const [mediaType, setMediaType] = useState(null);
 
   // Al cargar la pantalla, obtener recetas del usuario
   useEffect(() => {
@@ -495,6 +499,36 @@ export default function CreateRecipeScreen() {
           updatedSteps[index].media = base64;
           setSteps(updatedSteps);
         }
+      }
+    }
+  };
+
+  // Definir pickMedia antes del render principal
+  const pickMedia = async () => {
+    if (Platform.OS === 'web') {
+      alert('La carga de foto o video solo está disponible en la app móvil.');
+      return;
+    }
+    if (!DocumentPicker) return;
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['image/*', 'video/*'],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.type === 'success') {
+      if (result.mimeType && result.mimeType.startsWith('video')) {
+        // Validar tamaño del video
+        const fileInfo = await FileSystem.getInfoAsync(result.uri);
+        if (fileInfo.size > 5 * 1024 * 1024) {
+          setShowVideoSizeModal(true);
+          setLocalVideoUri(result.uri);
+          return;
+        }
+        setRecipeImage(result.uri);
+        setMediaType('video');
+      } else {
+        setRecipeImage(result.uri);
+        setMediaType('image');
       }
     }
   };
@@ -920,17 +954,12 @@ export default function CreateRecipeScreen() {
             </View>
 
             {/* Recipe Image */}
-            <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginBottom: 8 }}>
-              <TouchableOpacity style={[styles.imagePicker, { flex: 1 }]} onPress={() => pickMediaType('image', null)}>
-                <Ionicons name="image-outline" size={32} color="#f97316" />
-                <Text style={styles.uploadText}>Subir foto</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.imagePicker, { flex: 1 }]} onPress={() => Alert.alert('Funcionalidad en desarrollo', 'Por ahora, solo puedes subir imágenes. Pronto podrás subir videos.') }>
-                <Ionicons name="videocam-outline" size={32} color="#1e40af" />
-                <Text style={styles.uploadText}>Subir video</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'center', marginBottom: 8 }}>
+              <TouchableOpacity style={styles.mediaPickerButton} onPress={pickMedia}>
+                <Ionicons name="image-outline" size={32} color="#E2773C" />
+                <Text style={styles.uploadText}>Elegir foto o video</Text>
               </TouchableOpacity>
             </View>
-
             {recipeImage && (
               <View style={{ alignItems: 'center', marginVertical: 16 }}>
                 {recipeImage.startsWith('data:video') || recipeImage.endsWith('.mp4') || recipeImage.endsWith('.mov') || recipeImage.endsWith('.webm') ? (
@@ -1564,5 +1593,25 @@ const styles = StyleSheet.create({
   headerBtnDisabled: {
     backgroundColor: '#ccc',
     opacity: 0.7,
+  },
+  mediaPickerButton: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 20,
+    height: 300,
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: '#f97316',
+    borderStyle: 'dashed',
+  },
+  recipeImagePreview: {
+    width: 340,
+    height: 260,
+    borderRadius: 16,
+    marginTop: 12,
   },
 });
