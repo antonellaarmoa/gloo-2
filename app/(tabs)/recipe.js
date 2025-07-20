@@ -63,7 +63,7 @@ const updateStepIngredients = (originalStepIngredients, newIngredients) => {
 
 export default function RecipeScreen() {
   const router = useRouter();
-  const { post, id } = useLocalSearchParams();
+  const { post, id, from } = useLocalSearchParams();
   const { isSignedIn, userId } = useAuth();
 
   // Si viene el id, buscar del backend, si no, usar el post serializado (para compatibilidad)
@@ -751,7 +751,13 @@ export default function RecipeScreen() {
             <View style={styles.imageOverlay} />
             
             {/* Back button over image */}
-            <TouchableOpacity onPress={() => router.back()} style={styles.backButtonOverlay}>
+            <TouchableOpacity onPress={() => {
+              if (from === 'profile') {
+                router.replace('/(tabs)/profile');
+              } else {
+                router.back();
+              }
+            }} style={styles.backButtonOverlay}>
               <Ionicons name="chevron-back" size={24} color="#fff" />
             </TouchableOpacity>
             

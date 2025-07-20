@@ -19,7 +19,7 @@ const API_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
 
 export default function EditProfile() {
   const router = useRouter();
-  const { userId, user } = useAuth();
+  const { userId, user, getToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [userData, setUserData] = useState({
@@ -38,7 +38,13 @@ export default function EditProfile() {
 
   const fetchUserData = async () => {
     try {
-      const res = await fetch(`${API_URL}/users/${userId}`);
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/users/${userId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         setUserData({
@@ -73,7 +79,8 @@ export default function EditProfile() {
     setSaving(true);
     try {
       // 1. Actualizar en backend
-      const token = user && typeof user.getToken === 'function' ? await user.getToken() : null;
+      const token = await getToken();
+      console.log('TOKEN QUE SE ENVÍA AL BACKEND (edit-profile.js):', token);
       const res = await fetch(`${API_URL}/users/${userId}`, {
         method: 'PUT',
         headers: {
@@ -88,19 +95,29 @@ export default function EditProfile() {
           imageUrl: user?.imageUrl || undefined,
         }),
       });
-
+      if (!res.ok) {
+        const errorBody = await res.text();
+        console.error('RESPUESTA DEL BACKEND (edit-profile.js):', res.status, errorBody);
+        Alert.alert('Error', errorBody);
+      }
       // 2. Actualizar en Clerk
       if (user && typeof user.update === 'function') {
-        await user.update({ publicMetadata: { bio: userData.description } });
+        try {
+          await user.update({ publicMetadata: { ...user.publicMetadata, bio: userData.description } });
+          console.log('Bio guardada en Clerk:', userData.description);
+          if (typeof user.refetch === 'function') {
+            await user.refetch();
+            console.log('Datos de usuario Clerk recargados tras update.');
+          }
+        } catch (e) {
+          console.error('Error guardando bio en Clerk:', e);
+        }
       }
 
       if (res.ok) {
-        Alert.alert('Éxito', 'Perfil actualizado correctamente', [
-          { text: 'OK', onPress: () => router.push('/(tabs)/profile') }
-        ]);
-      } else {
-        const error = await res.json();
-        Alert.alert('Error', error.error || 'Error al actualizar el perfil');
+        Alert.alert('Éxito', 'Perfil actualizado correctamente');
+        router.replace('/(tabs)/profile');
+        return;
       }
     } catch (e) {
       console.log('Error updating profile:', e);

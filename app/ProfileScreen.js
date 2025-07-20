@@ -498,49 +498,55 @@ export default function ProfileScreen() {
   };
 
   // 1. Crea la función renderProfileHeader
-  const renderProfileHeader = () => (
-    <>
-      <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-        <Feather name="menu" size={20} color="white" />
-      </TouchableOpacity>
-      <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
-      <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
-        <Image source={getUserProfileImage()} style={styles.avatar} />
-      </TouchableOpacity>
-      <Text style={styles.name}>{getUserDisplayName()}</Text>
-      <Text style={styles.username}>{getUserUsername()}</Text>
-      <Text style={styles.bio}>{getUserBio()}</Text>
-      <View style={styles.statsContainer}>
-        <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{userRecipes.length > 0 ? userRecipes.length : userStats.recipes}</Text>
-          <Text style={styles.statLabel}>Recetas</Text>
+  const renderProfileHeader = () => {
+    console.log('BIO Clerk publicMetadata:', user?.publicMetadata?.bio, 'bio:', user?.bio);
+    console.log('USER Clerk:', user);
+    console.log('USER publicMetadata:', user?.publicMetadata);
+    console.log('USER unsafeMetadata:', user?.unsafeMetadata);
+    return (
+      <>
+        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+          <Feather name="menu" size={20} color="white" />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.statBox} onPress={handleFollowingPress} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{following.length > 0 ? following.length : userStats.following}</Text>
-          <Text style={styles.statLabel}>Siguiendo</Text>
+        <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+        <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
+          <Image source={user && user.imageUrl ? { uri: user.imageUrl } : require('../assets/user.jpeg')} style={styles.avatar} />
         </TouchableOpacity>
-        <TouchableOpacity style={styles.statBox} onPress={handleFollowersPress} activeOpacity={0.7}>
-          <Text style={styles.statNumber}>{followers.length > 0 ? followers.length : userStats.followers}</Text>
-          <Text style={styles.statLabel}>Seguidores</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.buttonsContainer}>
-        <TouchableOpacity style={[styles.actionButton, styles.orangeButton]} onPress={handleEditProfilePress}>
-          <Text style={styles.actionButtonText}>Editar Perfil</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShareModalVisible(true)}>
-          <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.tabsContainer}>
-        {['My Recipes', 'Favorites', 'Changed'].map(tab => (
-          <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabButton}>
-            <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+        <Text style={styles.name}>{user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Usuario'}</Text>
+        <Text style={styles.username}>{user && user.username ? `@${user.username}` : (userId ? `@${userId.slice(0, 8)}` : '@usuario')}</Text>
+        <Text style={styles.bio}>{user?.publicMetadata?.bio || user?.bio || '¡Comparte tus mejores recetas!'}</Text>
+        <View style={styles.statsContainer}>
+          <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')} activeOpacity={0.7}>
+            <Text style={styles.statNumber}>{userRecipes.length > 0 ? userRecipes.length : userStats.recipes}</Text>
+            <Text style={styles.statLabel}>Recetas</Text>
           </TouchableOpacity>
-        ))}
-      </View>
-    </>
-  );
+          <TouchableOpacity style={styles.statBox} onPress={handleFollowingPress} activeOpacity={0.7}>
+            <Text style={styles.statNumber}>{following.length > 0 ? following.length : userStats.following}</Text>
+            <Text style={styles.statLabel}>Siguiendo</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.statBox} onPress={handleFollowersPress} activeOpacity={0.7}>
+            <Text style={styles.statNumber}>{followers.length > 0 ? followers.length : userStats.followers}</Text>
+            <Text style={styles.statLabel}>Seguidores</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.buttonsContainer}>
+          <TouchableOpacity style={[styles.actionButton, styles.orangeButton]} onPress={handleEditProfilePress}>
+            <Text style={styles.actionButtonText}>Editar Perfil</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShareModalVisible(true)}>
+            <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.tabsContainer}>
+          {['My Recipes', 'Favorites', 'Changed'].map(tab => (
+            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabButton}>
+              <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </>
+    );
+  };
 
   // Renderizado de colecciones personalizadas en cards tipo carpeta (solo local, sin favoritos)
   const renderCustomCollections = () => {
@@ -662,7 +668,7 @@ export default function ProfileScreen() {
                       }}
                       onPress={() => router.push({
                         pathname: '/(tabs)/recipe',
-                        params: { post: JSON.stringify(item) }
+                        params: { post: JSON.stringify(item), from: 'profile' }
                       })}
                       isOwner={true}
                       onEdit={() => {
@@ -732,7 +738,7 @@ export default function ProfileScreen() {
                         }}
                         onPress={() => router.push({
                           pathname: '/(tabs)/recipe',
-                          params: { post: JSON.stringify(item) }
+                          params: { post: JSON.stringify(item), from: 'profile' }
                         })}
                       />
                     </View>
@@ -766,7 +772,7 @@ export default function ProfileScreen() {
                     }}
                     onPress={() => router.push({
                       pathname: '/(tabs)/recipe',
-                      params: { post: JSON.stringify(item) }
+                      params: { post: JSON.stringify(item), from: 'profile' }
                     })}
                   />
                 </View>

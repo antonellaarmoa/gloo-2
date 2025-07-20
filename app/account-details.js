@@ -9,14 +9,15 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 import { API_CONFIG, buildApiUrl } from '../config/api';
 
 const API_URL = API_CONFIG.BASE_URL; // Ya incluye /api/v1
 
 export default function AccountDetailsScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, getToken } = useAuth();
+  const { user: clerkUser } = useUser();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('********');
   const [userData, setUserData] = useState(null);
@@ -30,7 +31,13 @@ export default function AccountDetailsScreen() {
 
   const fetchUserData = async () => {
     try {
-      const res = await fetch(`${API_URL}/users/${user.id}`);
+      const token = await getToken();
+      const res = await fetch(`${API_URL}/users/${user.id}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
       if (res.ok) {
         const data = await res.json();
         setUserData(data);
@@ -44,34 +51,30 @@ export default function AccountDetailsScreen() {
     <View style={styles.container}>
       <TouchableOpacity 
         style={styles.backButton} 
-        onPress={() => router.back()}>
+        onPress={() => router.replace('/(tabs)/profile')}>
         <Ionicons name="chevron-back" size={24} color="#E2773C" />
       </TouchableOpacity>
 
       <Text style={styles.header}>Account Details</Text>
 
       <Image 
-        source={userData?.profileImage ? { uri: userData.profileImage } : require('../assets/user.jpeg')} 
+        source={user && user.imageUrl ? { uri: user.imageUrl } : require('../assets/user.jpeg')} 
         style={styles.avatar} 
       />
 
       <Text style={styles.label}>Email</Text>
       <TextInput
         style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        placeholder="Email"
-        placeholderTextColor="#fff"
+        value={user?.primaryEmailAddress?.emailAddress || ''}
+        editable={false}
       />
 
       <Text style={styles.label}>Password</Text>
       <TextInput
         style={styles.input}
-        value={password}
+        value={'********'}
+        editable={false}
         secureTextEntry
-        onChangeText={setPassword}
-        placeholder="Password"
-        placeholderTextColor="#fff"
       />
 
       <TouchableOpacity

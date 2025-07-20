@@ -697,35 +697,13 @@ export default function CreateRecipeScreen() {
         );
       } else {
         Alert.alert(
-          "¡Éxito!",
-          "Tu receta ha sido creada y publicada correctamente.",
+          'Creación pendiente',
+          'Tu receta está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
           [
             {
-              text: "Ver mi receta",
+              text: 'OK',
               onPress: () => {
-                router.push('/recipecreated');
-              }
-            },
-            {
-              text: "Crear otra",
-              onPress: async () => {
-                // Limpiar formulario solo si NO hay borrador guardado
-                const draftData = await AsyncStorage.getItem('@gloo:recipeDraft');
-                if (!draftData) {
-                  setTitle('');
-                  setDescription('');
-                  setPrepTime('');
-                  setCookTime('');
-                  setIngredients([]);
-                  setSteps([{ key: '1', text: '', media: null }]);
-                  setRecipeImage(null);
-                  setNewIngredient('');
-                  setNewAmount('');
-                  setNewUnit('');
-                  setIsEditingExisting(false);
-                  setRecipeId(null);
-                }
-                clearDraft();
+                router.replace('/(tabs)/home');
               }
             }
           ]
