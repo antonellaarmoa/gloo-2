@@ -25,7 +25,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URLS } from '../../config/api';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImageManipulator from 'expo-image-manipulator';
-import { Video } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import * as DocumentPicker from 'expo-document-picker';
 
 // Función robusta para hacer peticiones a la API
@@ -89,6 +89,12 @@ export default function CreateRecipeScreen() {
   const [showVideoSizeModal, setShowVideoSizeModal] = useState(false);
   const [localVideoUri, setLocalVideoUri] = useState(null);
   const [mediaType, setMediaType] = useState(null);
+
+  // Nuevo hook para el reproductor de video
+  const videoPlayer = useVideoPlayer(recipeImage, (player) => {
+    player.loop = true;
+    player.play();
+  });
 
   // Al cargar la pantalla, obtener recetas del usuario
   useEffect(() => {
@@ -505,31 +511,72 @@ export default function CreateRecipeScreen() {
 
   // Definir pickMedia antes del render principal
   const pickMedia = async () => {
-    if (Platform.OS === 'web') {
-      alert('La carga de foto o video solo está disponible en la app móvil.');
+    // Usar ImagePicker para acceder a la galería
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All, // Permitir imágenes y videos
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 1, // Usar calidad 1 para que la compresión posterior sea predecible
+    });
+
+    if (result.canceled || !result.assets || result.assets.length === 0) {
+      return; // El usuario canceló o no seleccionó nada
+    }
+
+    const asset = result.assets[0];
+    let uri = asset.uri;
+
+    // 1. Validar tamaño del archivo ANTES de procesar
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    if (!fileInfo.exists) {
+      Alert.alert('Error', 'El archivo seleccionado no está disponible.');
       return;
     }
-    if (!DocumentPicker) return;
-    const result = await DocumentPicker.getDocumentAsync({
-      type: ['image/*', 'video/*'],
-      copyToCacheDirectory: true,
-      multiple: false,
-    });
-    if (result.type === 'success') {
-      if (result.mimeType && result.mimeType.startsWith('video')) {
-        // Validar tamaño del video
-        const fileInfo = await FileSystem.getInfoAsync(result.uri);
-        if (fileInfo.size > 5 * 1024 * 1024) {
-          setShowVideoSizeModal(true);
-          setLocalVideoUri(result.uri);
-          return;
-        }
-        setRecipeImage(result.uri);
-        setMediaType('video');
-      } else {
-        setRecipeImage(result.uri);
-        setMediaType('image');
+    if (fileInfo.size > 30 * 1024 * 1024) { // Límite de 30MB
+      Alert.alert('Archivo demasiado grande', 'El archivo no puede superar los 30MB.');
+      return;
+    }
+
+    // 2. Procesar y convertir a Base64
+    let base64 = null;
+    const isVideo = asset.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
+
+    if (isVideo) {
+      setMediaType('video');
+      try {
+        const videoBase64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const extension = uri.split('.').pop().toLowerCase();
+        let mimeType = 'video/mp4';
+        if (extension === 'mov') mimeType = 'video/quicktime';
+        base64 = `data:${mimeType};base64,${videoBase64}`;
+      } catch (e) {
+        console.error('Error procesando el video a Base64:', e);
+        Alert.alert('Error', 'No se pudo procesar el video. Intenta con otro.');
+        return;
       }
+    } else { // Es una imagen
+      setMediaType('image');
+      try {
+        const manipulated = await ImageManipulator.manipulateAsync(
+          uri,
+          [{ resize: { width: 800 } }], // Redimensionar para optimizar
+          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
+        );
+        base64 = await convertImageToBase64(manipulated.uri); // Esta función ya añade el `data:image/jpeg;base64,`
+      } catch (e) {
+        console.error('Error procesando la imagen a Base64:', e);
+        Alert.alert('Error', 'No se pudo procesar la imagen. Intenta con otra.');
+        return;
+      }
+    }
+
+    // 3. Guardar el resultado en el estado
+    if (base64) {
+      setRecipeImage(base64);
+    } else {
+      Alert.alert('Error', 'No se pudo obtener el contenido del archivo.');
     }
   };
 
@@ -573,12 +620,10 @@ export default function CreateRecipeScreen() {
         />
         {item.media && (
           item.media.startsWith('data:video') ? (
-            <Video
-              source={{ uri: item.media }}
+            <VideoView
+              player={videoPlayer}
               style={styles.stepImage}
-              useNativeControls
-              resizeMode="contain"
-              isLooping
+              allowsFullscreen
             />
           ) : (
             <Image source={{ uri: item.media }} style={styles.stepImage} />
@@ -645,70 +690,52 @@ export default function CreateRecipeScreen() {
     setIsPublishing(true);
 
     try {
-      // Si hay que reemplazar, eliminar primero la receta existente
-      if (replaceRecipeId) {
-        await deleteRecipeFromBackend(replaceRecipeId);
-        setReplaceRecipeId(null); // Limpiar el estado
-      }
-      const recipeData = {
+      // Prepara el payload como JSON
+      const payload = {
         title: title.trim(),
         description: description.trim(),
-        estimatedTime: parseInt(prepTime) + parseInt(cookTime) || 30,
-        servings: parseInt(cookTime) || 4, // ahora cookTime es servings
-        ingredients: ingredients,
-        instructions: steps.map((step, index) => ({
-          text: step.text,
-          media: step.media,
+        estimatedTime: (parseInt(prepTime) + parseInt(cookTime) || 30),
+        servings: (parseInt(cookTime) || 4),
+        ingredients,
+        instructions: steps.map(step => ({
+          description: step.text,
+          image: null // o step.media si quieres soportar imágenes en pasos
         })),
-        recipeImage,
-        userId,
-        createdBy: userId,
-        updatedBy: userId,
+        media: recipeImage,
+        status: 'pending'
       };
 
-      let result;
-      if (isEditingExisting && recipeId) {
-        // Actualizar receta existente
-        result = await updateRecipe(recipeId, recipeData);
-      } else {
-        // Crear nueva receta
-        result = await createRecipe(recipeData);
+      const token = await getToken();
+      const url = API_URLS.RECIPES.CREATE(userId);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Error al publicar la receta');
       }
 
-      // Mostrar mensaje de éxito y navegar
-      if (isEditingExisting && recipeId) {
-        Alert.alert(
-          "¡Éxito!",
-          "Tu receta ha sido actualizada correctamente.",
-          [
-            {
-              text: "Ver mi receta",
-              onPress: () => {
-                router.push(`/recipe/${recipeId}`);
-              }
-            },
-            {
-              text: "OK",
-              onPress: () => {
-                router.back();
-              }
+      // El resto del flujo de éxito...
+      Alert.alert(
+        'Creación pendiente',
+        'Tu receta está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.replace('/(tabs)/home');
             }
-          ]
-        );
-      } else {
-        Alert.alert(
-          'Creación pendiente',
-          'Tu receta está pendiente de aprobación por un administrador. Te avisaremos cuando sea revisada.',
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                router.replace('/(tabs)/home');
-              }
-            }
-          ]
-        );
-      }
+          }
+        ]
+      );
       // Limpiar campos SIEMPRE después de publicar
       setTitle('');
       setDescription('');
@@ -940,13 +967,11 @@ export default function CreateRecipeScreen() {
             </View>
             {recipeImage && (
               <View style={{ alignItems: 'center', marginVertical: 16 }}>
-                {recipeImage.startsWith('data:video') || recipeImage.endsWith('.mp4') || recipeImage.endsWith('.mov') || recipeImage.endsWith('.webm') ? (
-                  <Video
-                    source={{ uri: recipeImage }}
+                {mediaType === 'video' ? (
+                  <VideoView
+                    player={videoPlayer}
                     style={{ width: 200, height: 200, borderRadius: 16 }}
-                    useNativeControls
-                    resizeMode="contain"
-                    isLooping
+                    allowsFullscreen
                   />
                 ) : (
                   <Image
@@ -955,7 +980,7 @@ export default function CreateRecipeScreen() {
                   />
                 )}
                 <Text style={{ color: '#888', fontSize: 12, marginTop: 4 }}>
-                  {recipeImage.startsWith('data:video') || recipeImage.endsWith('.mp4') || recipeImage.endsWith('.mov') || recipeImage.endsWith('.webm') ? 'Vista previa de video' : 'Vista previa de la imagen'}
+                  {mediaType === 'video' ? 'Vista previa de video' : 'Vista previa de la imagen'}
                 </Text>
               </View>
             )}

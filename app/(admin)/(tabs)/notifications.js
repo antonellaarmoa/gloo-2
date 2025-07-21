@@ -138,7 +138,7 @@ async function fetchAdminNotifications(getToken, userId, setRequests, setLoading
       res.data?.notifications ||
       [];
     // Filtrar solo notificaciones de tipo pendiente y que correspondan a recetas pending
-    const pendingTypes = ['recipe_pending', 'recipe_update_pending'];
+    const pendingTypes = ['recipe_pending', 'recipe_update_pending', 'recipe_approval'];
     const filteredNotifs = notificationsArr.filter(
       n => pendingTypes.includes(n.type) && pendingRecipeIds.includes(Number(n.relatedId))
     );
@@ -150,7 +150,9 @@ async function fetchAdminNotifications(getToken, userId, setRequests, setLoading
         notifByRecipe[key] = n;
       }
     });
-    setRequests(Object.values(notifByRecipe));
+    // Ordenar por fecha descendente (más recientes arriba)
+    const sortedNotifs = Object.values(notifByRecipe).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    setRequests(sortedNotifs);
     setRawDebug && setRawDebug(res);
   } catch (err) {
     console.error('Error al traer notificaciones:', err);
@@ -332,6 +334,11 @@ export default function AdminNotificationsScreen() {
             keyExtractor={item => item.id?.toString()}
             renderItem={({ item }) => {
               const typeBadge = getTypeBadge(item.type);
+              console.log('DEBUG NOTIF ITEM:', item);
+              if (item.recipe) {
+                console.log('DEBUG RECIPE DETAIL:', item.recipe);
+              }
+              let title = item.title || (item.recipe && (item.recipe.title || item.recipe.name)) || 'Receta sin título';
               return (
                 <TouchableOpacity
                   activeOpacity={0.85}
@@ -343,11 +350,11 @@ export default function AdminNotificationsScreen() {
                       requestId: item.relatedId
                     }
                   })}
-                  style={styles.cardSuperModern}
+                  style={[styles.cardSuperModern, { marginHorizontal: 8, marginBottom: 24, borderRadius: 24, padding: 20 }]}
                 >
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.titleSuper}>{item.title}</Text>
+                      <Text style={styles.titleSuper}>{title}</Text>
                       <Text style={{ color: '#888', fontSize: 12, marginBottom: 2 }}>ID Receta: {item.relatedId}</Text>
                       {item.author && (
                         <Text style={styles.autorSuper}>
@@ -371,12 +378,12 @@ export default function AdminNotificationsScreen() {
                       <Text style={styles.timeSuper}>{new Date(item.createdAt).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' })}</Text>
                     )}
                   </View>
-                  <View style={styles.actionsRowSuper}>
-                    <TouchableOpacity style={styles.actionBtnApproveSuper} onPress={(e) => { e.stopPropagation(); Alert.alert('Confirmar aprobación', '¿Estás seguro de aprobar esta receta?', [ { text: 'Cancelar', style: 'cancel' }, { text: 'Aprobar', style: 'default', onPress: () => handleAction(item, 'approve') } ]); }}>
+                  <View style={[styles.actionsRowSuper, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                    <TouchableOpacity style={[styles.actionBtnApproveSuper, { paddingHorizontal: 18 }]} onPress={(e) => { e.stopPropagation(); Alert.alert('Confirmar aprobación', '¿Estás seguro de aprobar esta receta?', [ { text: 'Cancelar', style: 'cancel' }, { text: 'Aprobar', style: 'default', onPress: () => handleAction(item, 'approve') } ]); }}>
                       <Ionicons name="checkmark-circle" size={28} color="#fff" style={{ marginRight: 12 }} />
                       <Text style={styles.actionBtnTextSuper}>Aprobar</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.actionBtnRejectSuper} onPress={(e) => { e.stopPropagation(); Alert.alert('Confirmar rechazo', '¿Estás seguro de rechazar esta receta?', [ { text: 'Cancelar', style: 'cancel' }, { text: 'Rechazar', style: 'destructive', onPress: () => handleAction(item, 'reject') } ]); }}>
+                    <TouchableOpacity style={[styles.actionBtnRejectSuper, { paddingHorizontal: 18 }]} onPress={(e) => { e.stopPropagation(); Alert.alert('Confirmar rechazo', '¿Estás seguro de rechazar esta receta?', [ { text: 'Cancelar', style: 'cancel' }, { text: 'Rechazar', style: 'destructive', onPress: () => handleAction(item, 'reject') } ]); }}>
                       <Ionicons name="close-circle" size={28} color="#fff" style={{ marginRight: 12 }} />
                       <Text style={styles.actionBtnTextSuper}>Rechazar</Text>
                     </TouchableOpacity>
@@ -413,7 +420,7 @@ export default function AdminNotificationsScreen() {
                 );
               })
             )}
-            contentContainerStyle={{ paddingBottom: 30 }}
+            contentContainerStyle={{ paddingBottom: 40, paddingTop: 10 }}
           />
         </>
       )}

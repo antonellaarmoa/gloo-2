@@ -50,9 +50,7 @@ export default function SearchScreen() {
 
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
-  const [userResults, setUserResults] = useState([]);
   const [combinedResults, setCombinedResults] = useState([]);
-  const [activeTab, setActiveTab] = useState('all'); // 'all', 'recipes', 'users'
   const [filterVisible, setFilterVisible] = useState(false);
   const [collectionModalVisible, setCollectionModalVisible] = useState(false);
   const [selectedRecipe, setSelectedRecipe] = useState(null);
@@ -169,7 +167,6 @@ export default function SearchScreen() {
       if (!search.trim()) {
         console.log('Search is empty, clearing results');
         setResults([]);
-        setUserResults([]);
         setCombinedResults([]);
         setLoading(false);
         return;
@@ -231,11 +228,12 @@ export default function SearchScreen() {
       
       console.log('✅ Recetas únicas:', uniqueRecipes.length);
       
-      // Organizar resultados según la pestaña activa
-      if (activeTab === 'users') {
-        // Agrupar por usuario
-        const userGroups = {};
-        uniqueRecipes.forEach(recipe => {
+      setResults(uniqueRecipes);
+      
+      // Crear lista de usuarios únicos a partir de las recetas
+      const userGroups = {};
+      uniqueRecipes.forEach(recipe => {
+        if (recipe.user) { // Asegurarse de que el usuario exista
           const userId = recipe.userId;
           if (!userGroups[userId]) {
             userGroups[userId] = {
@@ -245,48 +243,25 @@ export default function SearchScreen() {
             };
           }
           userGroups[userId].recipes.push(recipe);
-        });
-        
-        // Ordenar usuarios por número de recetas
-        const userResults = Object.values(userGroups).sort((a, b) => 
-          b.recipes.length - a.recipes.length
-        );
-        
-        setUserResults(userResults);
-        setResults([]);
-        setCombinedResults([]);
-      } else if (activeTab === 'recipes') {
-        setResults(uniqueRecipes);
-        setUserResults([]);
-        setCombinedResults([]);
-      } else {
-        // Pestaña "Todo"
-        setResults(uniqueRecipes);
-        
-        // Crear lista de usuarios únicos
-        const userGroups = {};
-        uniqueRecipes.forEach(recipe => {
-          const userId = recipe.userId;
-          if (!userGroups[userId]) {
-            userGroups[userId] = {
-              externalId: userId,
-              clerkUserData: recipe.user,
-              recipes: []
-            };
-          }
-          userGroups[userId].recipes.push(recipe);
-        });
-        
-        const userResults = Object.values(userGroups);
-        setUserResults(userResults);
-        
-        // Crear lista combinada
-        const combined = [
-          ...uniqueRecipes.map(recipe => ({ ...recipe, type: 'recipe' })),
-          ...userResults.map(user => ({ ...user, type: 'user' }))
-        ];
-        setCombinedResults(combined);
-      }
+        }
+      });
+      
+      const userResults = Object.values(userGroups);
+      
+      // Crear lista combinada para "Todo"
+      const combined = [
+        ...userResults.map(user => ({ ...user, type: 'user' })),
+        ...uniqueRecipes.map(recipe => ({ ...recipe, type: 'recipe' }))
+      ];
+
+      // Ordenar: primero usuarios, luego recetas
+      combined.sort((a, b) => {
+        if (a.type === 'user' && b.type !== 'user') return -1;
+        if (a.type !== 'user' && b.type === 'user') return 1;
+        return 0;
+      });
+
+      setCombinedResults(combined);
       
       // Guardar en historial
       if (search.trim() && isSignedIn && userId) {
@@ -306,53 +281,7 @@ export default function SearchScreen() {
     } catch (e) {
       console.error('❌ Error fetching search results:', e);
       setResults([]);
-      setUserResults([]);
       setCombinedResults([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Función específica para búsqueda de usuarios
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      if (!search.trim()) {
-        setUserResults([]);
-        setLoading(false);
-        return;
-      }
-
-      const searchUrl = `${API_URL}/search/users?query=${encodeURIComponent(search.trim())}&limit=50`;
-      console.log('🔍 Buscando usuarios con URL:', searchUrl);
-      
-      const response = await fetch(searchUrl, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(data.message || 'Error en la búsqueda de usuarios');
-      }
-      
-      const users = data.data || [];
-      console.log('👥 Usuarios encontrados:', users.length);
-      
-      setUserResults(users);
-      setResults([]);
-      setCombinedResults([]);
-      
-    } catch (e) {
-      console.error('❌ Error fetching users:', e);
-      setUserResults([]);
     } finally {
       setLoading(false);
     }
@@ -453,14 +382,6 @@ export default function SearchScreen() {
       }
       
       // Agregar sugerencias específicas para usuarios si estamos en la pestaña de usuarios
-      if (activeTab === 'users') {
-        const userSuggestions = [
-          'facu', 'facupotti', 'facu_thechef', 'anto', 'frutilla', 'niky', 'adrian',
-          'chef', 'cocinero', 'usuario', 'user', 'thechef'
-        ];
-        suggestions = [...userSuggestions, ...suggestions];
-      }
-      
       setSuggestions(suggestions);
     } catch (e) {
       // Sugerencias de respaldo más flexibles
@@ -486,15 +407,6 @@ export default function SearchScreen() {
         'tradicional',
         'moderno'
       ];
-      
-      // Agregar sugerencias de usuario si estamos en esa pestaña
-      if (activeTab === 'users') {
-        const userSuggestions = [
-          'facu', 'facupotti', 'facu_thechef', 'anto', 'frutilla', 'niky', 'adrian',
-          'chef', 'cocinero', 'usuario', 'user', 'thechef'
-        ];
-        backupSuggestions = [...userSuggestions, ...backupSuggestions];
-      }
       
       setSuggestions(backupSuggestions);
     }
@@ -524,13 +436,9 @@ export default function SearchScreen() {
       }
       
       // Ejecutar búsqueda inmediatamente para filtros
-      if (activeTab === 'users') {
-        fetchUsers();
-      } else {
-        fetchRecipes();
-      }
+      fetchRecipes();
     }
-  }, [selectedCategory, duration, excludedIngredients, sortBy, activeTab]);
+  }, [selectedCategory, duration, excludedIngredients, sortBy]);
 
   const handleSearch = (text) => {
     console.log('Search text changed:', text);
@@ -544,7 +452,6 @@ export default function SearchScreen() {
     // Si el texto está vacío, limpiar resultados inmediatamente
     if (!text.trim()) {
       setResults([]);
-      setUserResults([]);
       setCombinedResults([]);
       setLoading(false);
       return;
@@ -553,12 +460,8 @@ export default function SearchScreen() {
     // Debounce de 300ms para búsquedas (más rápido)
     const newTimeout = setTimeout(() => {
       if (text.trim()) {
-        console.log('Executing search for:', text, 'Active tab:', activeTab);
-        if (activeTab === 'users') {
-          fetchUsers();
-        } else {
-          fetchRecipes();
-        }
+        console.log('Executing search for:', text);
+        fetchRecipes();
       }
     }, 300);
     
@@ -566,7 +469,7 @@ export default function SearchScreen() {
   };
   
   const handleSubmitSearch = () => {
-    console.log('Submitting search:', search, 'Active tab:', activeTab);
+    console.log('Submitting search:', search);
     if (search.trim() === '') return;
     
     // Limpiar timeout si existe
@@ -574,11 +477,7 @@ export default function SearchScreen() {
       clearTimeout(searchTimeout);
     }
     
-    if (activeTab === 'users') {
-      fetchUsers();
-    } else {
-      fetchRecipes();
-    }
+    fetchRecipes();
   };
   
   const handleDeleteHistoryItem = async (item) => {
@@ -819,18 +718,8 @@ export default function SearchScreen() {
   };
 
   // Funciones optimizadas para calcular contadores
-  const getRecipesCount = () => {
-    if (activeTab === 'users') return 0;
-    return results.length;
-  };
-
-  const getUsersCount = () => {
-    if (activeTab === 'recipes') return 0;
-    return userResults.length;
-  };
-
   const getAllResultsCount = () => {
-    return getRecipesCount() + getUsersCount();
+    return combinedResults.length;
   };
 
   const renderUser = ({ item }) => {
@@ -996,36 +885,6 @@ export default function SearchScreen() {
         </View>
       )}
 
-      {/* Pestañas de búsqueda */}
-      {search.length > 0 && (
-        <View style={styles.tabsContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'all' && styles.activeTab]} 
-            onPress={() => setActiveTab('all')}
-          >
-            <Text style={[styles.tabText, activeTab === 'all' && styles.activeTabText]}>
-              Todo ({getAllResultsCount()})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'recipes' && styles.activeTab]} 
-            onPress={() => setActiveTab('recipes')}
-          >
-            <Text style={[styles.tabText, activeTab === 'recipes' && styles.activeTabText]}>
-              Recetas ({getRecipesCount()})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'users' && styles.activeTab]} 
-            onPress={() => setActiveTab('users')}
-          >
-            <Text style={[styles.tabText, activeTab === 'users' && styles.activeTabText]}>
-              Usuarios ({getUsersCount()})
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Indicador de resultados */}
       {search.length > 0 && !loading && (
         <View style={styles.resultsIndicator}>
@@ -1092,18 +951,13 @@ export default function SearchScreen() {
         </ScrollView>
       ) : (
         <FlatList
-          data={
-            activeTab === 'users' ? userResults :
-            activeTab === 'recipes' ? results :
-            [...results.map(r => ({ ...r, type: 'recipe' })), ...userResults.map(u => ({ ...u, type: 'user' }))]
-          }
+          data={combinedResults}
           renderItem={({ item, index }) => {
-            if (activeTab === 'users') return renderUser({ item });
             if (item.type === 'user') return renderUser({ item });
             return renderRecipe({ item, index });
           }}
           keyExtractor={(item) =>
-            item.type === 'user' || activeTab === 'users' ?
+            item.type === 'user' ?
               item.externalId?.toString() || Math.random().toString() :
               item.id?.toString() || Math.random().toString()
           }
@@ -1120,7 +974,7 @@ export default function SearchScreen() {
               </View>
             )
           }
-          key={activeTab + '-list'}
+          key={'all-results-list'}
         />
       )}
 
