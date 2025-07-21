@@ -50,11 +50,16 @@ function RootLayoutWithRedirect() {
     
     // Agregar un pequeño delay para asegurar que todo esté listo
     const timer = setTimeout(() => {
-      if (pathname === '/' && isSignedIn) {
-        if (user && user.publicMetadata?.role === 'admin') {
-          router.replace('/(admin)/(tabs)/notifications');
+      if (pathname === '/') {
+        if (isSignedIn) {
+          if (user && user.publicMetadata?.role === 'admin') {
+            router.replace('/(admin)/(tabs)/notifications');
+          } else {
+            router.replace('/(tabs)/home');
+          }
         } else {
-          router.replace('/(tabs)/home');
+          // Si no está autenticado, ir a onboarding
+          router.replace('/onboarding');
         }
       }
     }, 100);
@@ -71,7 +76,7 @@ function RootLayoutWithRedirect() {
     );
   }
 
-  if (!fontsLoaded || !userLoaded || !isReady || (pathname === '/' && isSignedIn)) {
+  if (!fontsLoaded || !userLoaded || !isReady || pathname === '/') {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <ActivityIndicator size="large" color="#f97316" />

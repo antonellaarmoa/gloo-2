@@ -1,15 +1,12 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Dimensions, ImageBackground, StatusBar, Platform, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Dimensions, StyleSheet } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
 export default function Index() {
   const router = useRouter();
-  useEffect(() => {
-    router.replace('onboarding');
-  }, []);
+  
+  // Simplemente retornar null y dejar que _layout.js maneje la navegación
   return null;
 }
 

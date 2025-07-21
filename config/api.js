@@ -99,6 +99,7 @@ export const API_URLS = {
   COMMENTS: {
     CREATE: (recipeId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COMMENTS}/${recipeId}/comment`),
     GET_ALL: (recipeId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COMMENTS}/${recipeId}/comments`),
+    BY_RECIPE: (recipeId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COMMENTS}/${recipeId}/comments`),
     DELETE: (commentId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COMMENTS}/${commentId}`),
   },
   NOTIFICATIONS: {

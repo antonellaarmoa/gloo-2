@@ -1,31 +1,31 @@
-import React, { useState, useEffect } from 'react';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  ScrollView,
-  TouchableOpacity,
-  TextInput,
-  Switch,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  Alert,
-  ActivityIndicator,
-  Share
-} from 'react-native';
-import { Ionicons, FontAwesome } from '@expo/vector-icons';
 import { useAuth } from '@clerk/clerk-expo';
-import { useQuery } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
-import SaveRecipeModal from '../../components/SaveRecipeModal';
+import { useQuery } from '@tanstack/react-query';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+    ActivityIndicator,
+    Alert,
+    Image,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    Share,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
+} from 'react-native';
 import LikeButton from '../../components/LikeButton';
 import RatingStars from '../../components/RatingStars';
-import { syncFavoritesWithSavedState, isRecipeFavorite } from '../../utils/favoritesManager';
+import SaveRecipeModal from '../../components/SaveRecipeModal';
+import { API_CONFIG, API_URLS, buildApiUrl } from '../../config/api';
+import { isRecipeFavorite, syncFavoritesWithSavedState } from '../../utils/favoritesManager';
 
 const API_URL = buildApiUrl(API_CONFIG.ENDPOINTS.RECIPES);
 

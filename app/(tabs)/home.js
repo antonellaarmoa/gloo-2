@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, ImageBackground, Dimensions, TouchableOpacity, Modal, ActivityIndicator, Alert, Animated, Easing, TextInput, ScrollView, Share } from 'react-native';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@clerk/clerk-expo';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { addToFavorites, removeFromFavorites, syncFavoritesWithSavedState, refreshProfileFavorites, getCustomCollections, createCustomCollection, addRecipeToCustomCollection, getRecipesFromCustomCollection, removeRecipeFromCustomCollection, deleteCustomCollection, isRecipeFavorite, forceSyncFavorites, repairFavorites } from '../../utils/favoritesManager';
-import { API_CONFIG, buildApiUrl, API_URLS } from '../../config/api';
-import SaveRecipeModal from '../../components/SaveRecipeModal';
+import { useQuery } from '@tanstack/react-query';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Dimensions, Easing, FlatList, Image, ImageBackground, Modal, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LikeButton from '../../components/LikeButton';
+import SaveRecipeModal from '../../components/SaveRecipeModal';
+import { API_CONFIG, API_URLS } from '../../config/api';
+import { addRecipeToCustomCollection, addToFavorites, createCustomCollection, deleteCustomCollection, getCustomCollections, isRecipeFavorite, removeFromFavorites, repairFavorites, syncFavoritesWithSavedState } from '../../utils/favoritesManager';
 
 const { height, width } = Dimensions.get('window');
 
@@ -331,8 +331,10 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
       return;
     }
 
-    // Actualizar estado de like (el useEffect se encargará del contador)
-    onLikeToggle(item.id, !liked);
+    // Actualizar estado de like local
+    const newLikes = { ...userLikes, [item.id]: !liked };
+    setUserLikes(newLikes);
+    await saveLikesLocally(newLikes);
 
     // Intentar sincronizar con backend
     if (userId) {
@@ -532,11 +534,11 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
           // No existe en local, créala
           await createCustomCollection(userId, normalizedName, col.name, col.id);
         } else {
-          // Existe, actualiza id si es necesario
-          if (localCollections[idx].id != col.id) {
-            localCollections[idx].id = col.id;
-            await AsyncStorage.setItem(getCollectionsKey(userId), JSON.stringify(localCollections));
-          }
+                  // Existe, actualiza id si es necesario
+        if (localCollections[idx].id != col.id) {
+          localCollections[idx].id = col.id;
+          await AsyncStorage.setItem(`@gloo:customCollections_${userId}`, JSON.stringify(localCollections));
+        }
         }
       }
     }
