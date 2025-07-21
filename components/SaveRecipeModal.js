@@ -86,7 +86,7 @@ export default function SaveRecipeModal({ visible, onClose, recipe, userId, onSa
       if (isFavorite) {
         // Remover de favoritos
         const localRemoved = await removeFromFavorites(userId, recipe.id);
-        const backendRemoved = await makeApiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+        const backendRemoved = await makeApiRequest(API_URLS.FAVORITES.REMOVE(userId), {
           method: 'DELETE',
           body: JSON.stringify({ recipeId: recipe.id }),
           headers: { 'Content-Type': 'application/json' },
@@ -100,7 +100,7 @@ export default function SaveRecipeModal({ visible, onClose, recipe, userId, onSa
       } else {
         // Agregar a favoritos
         const localAdded = await addToFavorites(userId, recipe);
-        const backendAdded = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+        const backendAdded = await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
           method: 'POST',
           body: JSON.stringify({ recipeId: recipe.id }),
           headers: { 'Content-Type': 'application/json' },
@@ -134,7 +134,7 @@ export default function SaveRecipeModal({ visible, onClose, recipe, userId, onSa
       const localSaved = await addRecipeToCustomCollection(userId, collectionId, recipe);
       
       // También agregar a favoritos backend
-      const backendSaved = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+      const backendSaved = await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
         method: 'POST',
         body: JSON.stringify({ recipeId: recipe.id }),
         headers: { 'Content-Type': 'application/json' },

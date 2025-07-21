@@ -370,7 +370,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
         const localRemoved = await removeFromFavorites(userId, item.id);
         
         // Remover del backend
-        const backendRemoved = await makeApiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+        const backendRemoved = await makeApiRequest(API_URLS.FAVORITES.REMOVE(userId), {
           method: 'DELETE',
           body: JSON.stringify({ recipeId: item.id }),
           headers: { 'Content-Type': 'application/json' },
@@ -396,7 +396,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
         const localAdded = await addToFavorites(userId, item);
         
         // Agregar al backend
-        const backendAdded = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+        const backendAdded = await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
           method: 'POST',
           body: JSON.stringify({ recipeId: item.id }),
           headers: { 'Content-Type': 'application/json' },
@@ -550,7 +550,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
     await saveRecipeToCustomCollection(collectionId);
     // 2. Guardar en Favoritos del backend
     try {
-      await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+      await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
         method: 'POST',
         body: JSON.stringify({ recipeId: item.id }),
         headers: { 'Content-Type': 'application/json' },
@@ -592,7 +592,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
         const isFav = await isRecipeFavorite(userId, item.id);
         if (!isFav) {
           await addToFavorites(userId, item); // local
-          await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+          await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
             method: 'POST',
             body: JSON.stringify({ recipeId: item.id }),
             headers: { 'Content-Type': 'application/json' },
@@ -649,7 +649,7 @@ function PostItem({ item, isGuest, onGuestLimit, index, userLikes, setUserLikes,
         const isFav = await isRecipeFavorite(userId, item.id);
         if (!isFav) {
           await addToFavorites(userId, item); // local
-          await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+          await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
             method: 'POST',
             body: JSON.stringify({ recipeId: item.id }),
             headers: { 'Content-Type': 'application/json' },
@@ -1164,7 +1164,7 @@ export default function HomeScreen() {
   // Función para agregar a favoritos backend (scope global)
   const addRecipeToFavoritesBackend = async (userId, recipeId) => {
     try {
-      const res = await makeApiRequest(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+      const res = await makeApiRequest(API_URLS.FAVORITES.ADD(userId), {
         method: 'POST',
         body: JSON.stringify({ recipeId: recipeId }),
         headers: { 'Content-Type': 'application/json' },
@@ -1180,7 +1180,7 @@ export default function HomeScreen() {
   // Función para remover de favoritos backend (scope global)
   const removeRecipeFromFavoritesBackend = async (userId, recipeId) => {
     try {
-      const res = await makeApiRequest(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+      const res = await makeApiRequest(API_URLS.FAVORITES.REMOVE(userId), {
         method: 'DELETE',
         body: JSON.stringify({ recipeId: recipeId }),
         headers: { 'Content-Type': 'application/json' },

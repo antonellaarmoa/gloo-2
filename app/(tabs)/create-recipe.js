@@ -1354,13 +1354,9 @@ export default function CreateRecipeScreen() {
 
             {/* Instructions Section */}
             <Text style={styles.sectionTitle}>Instructions</Text>
-            <DraggableFlatList
-              data={steps}
-              keyExtractor={(item) => item.key}
-              onDragEnd={({ data }) => setSteps(data)}
-              renderItem={renderStep}
-              scrollEnabled={false}
-            />
+            <View>
+              {steps.map((item, index) => renderStep({ item, index }))}
+            </View>
 
             <TouchableOpacity style={styles.addStepBtn} onPress={addStep}>
               <Ionicons name="add-circle-outline" size={24} color="#1e40af" />

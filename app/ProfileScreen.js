@@ -4,19 +4,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Dimensions,
-  FlatList,
-  Image,
-  Modal,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  ToastAndroid,
-  TouchableOpacity,
-  View
+    ActivityIndicator,
+    Alert,
+    Dimensions,
+    FlatList,
+    Image,
+    Modal,
+    Platform,
+    ScrollView,
+    StyleSheet,
+    Text,
+    ToastAndroid,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import MenuModal from '../components/MenuModal';
 import RecipeCard from '../components/RecipeCard';
@@ -302,14 +302,16 @@ export default function ProfileScreen() {
   }, [isSignedIn, userId]);
 
   useEffect(() => {
-    const syncLocalCollections = async () => {
+    const refreshProfileData = async () => {
       if (!userId) return;
-      const localCollections = await getCustomCollections(userId);
-      setUserCollections(localCollections);
+      console.log('Refreshing profile data on focus...');
+      await fetchProfileData();
+      await loadChangedRecipes();
     };
-    syncLocalCollections();
+    
+    // Refrescar datos cuando la pantalla se enfoca
     if (router?.addListener) {
-      const unsubscribe = router.addListener('focus', syncLocalCollections);
+      const unsubscribe = router.addListener('focus', refreshProfileData);
       return () => unsubscribe && unsubscribe();
     }
   }, [userId]);
@@ -558,7 +560,6 @@ export default function ProfileScreen() {
 
   // Renderizado de colecciones personalizadas en cards tipo carpeta (solo local, sin favoritos)
   const renderCustomCollections = () => {
-    console.log('DEBUG: userCollections en render', userCollections);
     return (
       <View>
         <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#E2773C', marginTop: 28, marginBottom: 10, marginLeft: 4 }}>
@@ -726,43 +727,66 @@ export default function ProfileScreen() {
               </View>
             </>
           ) : activeTab === 'Favorites' ? (
-            <ScrollView contentContainerStyle={{ padding: 12, paddingBottom: 80 }} showsVerticalScrollIndicator={false}>
-              <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 12, marginLeft: 4 }}>
-                Favoritos
-              </Text>
-              <View style={{ marginBottom: 24 }}>
-                <FlatList
-                  data={favoriteRecipes}
-                  keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
-                  numColumns={2}
-                  renderItem={({ item }) => (
-                    <View style={styles.recipeCard}>
-                      <RecipeCard
-                        recipe={{
-                          ...item,
-                          title: item.title || 'Sin título',
-                          description: item.description || 'Sin descripción',
-                          estimatedTime: item.estimatedTime || item.duration || 30,
-                        }}
-                        onPress={() => router.push({
-                          pathname: '/(tabs)/recipe',
-                          params: { post: JSON.stringify(item), from: 'profile' }
-                        })}
-                      />
-                    </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ padding: 12, paddingBottom: 80 }}>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 12, marginLeft: 4 }}>
+                  Favoritos
+                </Text>
+                <View style={{ marginBottom: 24 }}>
+                  <FlatList
+                    data={favoriteRecipes}
+                    keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
+                    numColumns={2}
+                    renderItem={({ item }) => (
+                      <View style={styles.recipeCard}>
+                        <RecipeCard
+                          recipe={{
+                            ...item,
+                            title: item.title || 'Sin título',
+                            description: item.description || 'Sin descripción',
+                            estimatedTime: item.estimatedTime || item.duration || 30,
+                          }}
+                          onPress={() => router.push({
+                            pathname: '/(tabs)/recipe',
+                            params: { post: JSON.stringify(item), from: 'profile' }
+                          })}
+                        />
+                      </View>
+                    )}
+                    contentContainerStyle={styles.recipesGrid}
+                    showsVerticalScrollIndicator={false}
+                    ListEmptyComponent={<Text style={{ color: '#888' }}>No tienes recetas favoritas.</Text>}
+                  />
+                  {/* Si userStats dice que hay favoritos pero el array está vacío, mostrar el array en texto para depuración */}
+                  {userStats.favorites > 0 && favoriteRecipes.length === 0 && (
+                    <Text style={{ color: 'red', fontSize: 12 }}>favoriteRecipes vacío pero userStats.favorites = {userStats.favorites}. Datos: {JSON.stringify(favoriteRecipes)}</Text>
                   )}
-                  contentContainerStyle={styles.recipesGrid}
-                  showsVerticalScrollIndicator={false}
-                  ListEmptyComponent={<Text style={{ color: '#888' }}>No tienes recetas favoritas.</Text>}
-                />
-                {/* Si userStats dice que hay favoritos pero el array está vacío, mostrar el array en texto para depuración */}
-                {userStats.favorites > 0 && favoriteRecipes.length === 0 && (
-                  <Text style={{ color: 'red', fontSize: 12 }}>favoriteRecipes vacío pero userStats.favorites = {userStats.favorites}. Datos: {JSON.stringify(favoriteRecipes)}</Text>
-                )}
+                </View>
+                {/* Render colecciones personalizadas (solo local) */}
+                {renderCustomCollections()}
+                
+                {/* Botón de debug temporal */}
+                <TouchableOpacity 
+                  style={{ 
+                    backgroundColor: '#E2773C', 
+                    padding: 12, 
+                    borderRadius: 8, 
+                    marginTop: 20,
+                    alignItems: 'center'
+                  }}
+                  onPress={async () => {
+                    console.log('DEBUG: Testing local collections...');
+                    const localCollections = await getCustomCollections(userId);
+                    console.log('DEBUG: Current local collections:', localCollections);
+                    setUserCollections(localCollections);
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>
+                    Debug: Recargar Colecciones Locales
+                  </Text>
+                </TouchableOpacity>
               </View>
-              {/* Render colecciones personalizadas (solo local) */}
-              {renderCustomCollections()}
-            </ScrollView>
+            </View>
           ) : activeTab === 'Changed' ? (
             <FlatList
               data={changedRecipes}
@@ -841,21 +865,16 @@ export default function ProfileScreen() {
             {selectedCollectionRecipes.length === 0 ? (
               <Text style={styles.emptyStateText}>No hay recetas en esta colección</Text>
             ) : (
-              <FlatList
-                data={selectedCollectionRecipes}
-                keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
-                renderItem={({ item }) => (
-                  <View style={{ marginBottom: 18, alignItems: 'center', width: '100%' }}>
+              <View style={{ maxHeight: 400, minWidth: 260, width: 320, alignSelf: 'center' }}>
+                {selectedCollectionRecipes.map((item, idx) => (
+                  <View key={item.id?.toString() || idx.toString()} style={{ marginBottom: 18, alignItems: 'center', width: '100%' }}>
                     <RecipeCard
                       recipe={item}
                       onPress={() => router.push(`/recipe/${item.id}`)}
                     />
                   </View>
-                )}
-                contentContainerStyle={{ paddingBottom: 8, paddingTop: 8, alignItems: 'center' }}
-                showsVerticalScrollIndicator={false}
-                style={{ maxHeight: 400, minWidth: 260, width: 320, alignSelf: 'center' }}
-              />
+                ))}
+              </View>
             )}
           </View>
         </View>

@@ -656,7 +656,7 @@ export default function SearchScreen() {
           const localAdded = await addToFavorites(userId, recipe);
           
           // Agregar al backend
-          const response = await fetch(API_URLS.COLLECTIONS.ADD_TO_FAVORITES(userId), {
+          const response = await fetch(API_URLS.FAVORITES.ADD(userId), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ recipeId: recipeId })
@@ -670,7 +670,7 @@ export default function SearchScreen() {
           const localRemoved = await removeFromFavorites(userId, recipeId);
           
           // Remover del backend
-          const response = await fetch(API_URLS.COLLECTIONS.REMOVE_FROM_FAVORITES(userId), {
+          const response = await fetch(API_URLS.FAVORITES.REMOVE(userId), {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ recipeId: recipeId })
@@ -898,57 +898,59 @@ export default function SearchScreen() {
       )}
 
       {search.length === 0 ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }}>
-          {suggestions.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>🔥 Tendencias</Text>
-              <View style={styles.suggestionsContainer}>
-                {suggestions.map((s, i) => (
-                  <TouchableOpacity key={i} style={styles.suggestionPill} onPress={() => setSearch(s)}>
-                    <Ionicons name="trending-up" size={16} color="#E2773C" />
-                    <Text style={styles.suggestionText}>{s}</Text>
-                  </TouchableOpacity>
+        <View style={{ flex: 1 }}>
+          <View style={{ paddingBottom: 40 }}>
+            {suggestions.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>🔥 Tendencias</Text>
+                <View style={styles.suggestionsContainer}>
+                  {suggestions.map((s, i) => (
+                    <TouchableOpacity key={i} style={styles.suggestionPill} onPress={() => setSearch(s)}>
+                      <Ionicons name="trending-up" size={16} color="#E2773C" />
+                      <Text style={styles.suggestionText}>{s}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+
+            {searchHistory.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>⏰ Historial</Text>
+                {searchHistory.map((item, i) => (
+                  <View key={i} style={styles.historyRow}>
+                    <TouchableOpacity style={styles.historyButton} onPress={() => setSearch(item)}>
+                      <Ionicons name="time-outline" size={16} color="#666" />
+                      <Text style={styles.historyText}>{item}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => handleDeleteHistoryItem(item)} style={styles.deleteButton}>
+                      <Ionicons name="close" size={16} color="#E2773C" />
+                    </TouchableOpacity>
+                  </View>
                 ))}
               </View>
-            </View>
-          )}
+            )}
 
-          {searchHistory.length > 0 && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>⏰ Historial</Text>
-              {searchHistory.map((item, i) => (
-                <View key={i} style={styles.historyRow}>
-                  <TouchableOpacity style={styles.historyButton} onPress={() => setSearch(item)}>
-                    <Ionicons name="time-outline" size={16} color="#666" />
-                    <Text style={styles.historyText}>{item}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDeleteHistoryItem(item)} style={styles.deleteButton}>
-                    <Ionicons name="close" size={16} color="#E2773C" />
-                  </TouchableOpacity>
-                </View>
-              ))}
+              <Text style={styles.sectionTitle}>📂 Categorías</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoriesContainer}>
+                {categories.map(cat => {
+                  const categoryId = cat.id?.toString() || cat.key?.toString() || '';
+                  return (
+                    <TouchableOpacity
+                      key={cat.id || cat.key}
+                      style={[styles.categoryPill, selectedCategory === categoryId && styles.categoryPillActive]}
+                      onPress={() => setSelectedCategory(selectedCategory === categoryId ? '' : categoryId)}
+                    >
+                      <Ionicons name={cat.icon || 'restaurant-outline'} size={16} color={selectedCategory === categoryId ? '#fff' : '#E2773C'} />
+                      <Text style={[styles.categoryText, selectedCategory === categoryId && styles.categoryTextActive]}>{cat.displayName || cat.name || cat.label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
             </View>
-          )}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>📂 Categorías</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoriesContainer}>
-              {categories.map(cat => {
-                const categoryId = cat.id?.toString() || cat.key?.toString() || '';
-                return (
-                  <TouchableOpacity
-                    key={cat.id || cat.key}
-                    style={[styles.categoryPill, selectedCategory === categoryId && styles.categoryPillActive]}
-                    onPress={() => setSelectedCategory(selectedCategory === categoryId ? '' : categoryId)}
-                  >
-                    <Ionicons name={cat.icon || 'restaurant-outline'} size={16} color={selectedCategory === categoryId ? '#fff' : '#E2773C'} />
-                    <Text style={[styles.categoryText, selectedCategory === categoryId && styles.categoryTextActive]}>{cat.displayName || cat.name || cat.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
           </View>
-        </ScrollView>
+        </View>
       ) : (
         <FlatList
           data={combinedResults}

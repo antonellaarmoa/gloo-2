@@ -64,7 +64,7 @@ const updateStepIngredients = (originalStepIngredients, newIngredients) => {
 export default function RecipeScreen() {
   const router = useRouter();
   const { post, id, from } = useLocalSearchParams();
-  const { isSignedIn, userId } = useAuth();
+  const { isSignedIn, userId, getToken } = useAuth();
 
   // Si viene el id, buscar del backend, si no, usar el post serializado (para compatibilidad)
   const recipeId = id || (post && JSON.parse(post)?.id);
@@ -571,10 +571,12 @@ export default function RecipeScreen() {
 
     setSubmittingComment(true);
     try {
+      const token = await getToken();
       const response = await fetch(API_URLS.COMMENTS.CREATE(userId), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
           recipeId: parseInt(recipeId),

@@ -24,7 +24,7 @@ export default function CommentsScreen() {
   const [sending, setSending] = useState(false);
   const router = useRouter();
   const { post, id } = useLocalSearchParams();
-  const { userId } = useAuth();
+  const { userId, getToken } = useAuth();
   
   // Get recipe ID from parameters - only use id parameter
   const recipeId = id ? parseInt(id) : null;
@@ -151,11 +151,13 @@ export default function CommentsScreen() {
       console.log('URL:', API_URLS.COMMENTS.CREATE(userId));
       console.log('Payload:', { recipeId: recipeId, content: newComment.trim() });
       
+      const token = await getToken();
       const res = await fetch(API_URLS.COMMENTS.CREATE(userId), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({ 
           recipeId: recipeId, 
