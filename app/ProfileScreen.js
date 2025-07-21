@@ -1,30 +1,28 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Image,
-  TouchableOpacity,
-  ScrollView,
-  ActivityIndicator,
-  Dimensions,
-  Alert,
-  AppState,
-  FlatList,
-  TextInput,
-  Modal,
-  Platform,
-  ToastAndroid,
-} from 'react-native';
-import { useRouter } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
-import RecipeCard from '../components/RecipeCard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  FlatList,
+  Image,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  ToastAndroid,
+  TouchableOpacity,
+  View
+} from 'react-native';
 import MenuModal from '../components/MenuModal';
+import RecipeCard from '../components/RecipeCard';
 import ShareProfileModal from '../components/ShareProfileModal';
 import { API_URLS } from '../config/api';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getCustomCollections, getRecipesFromCustomCollection, deleteCustomCollection } from '../utils/favoritesManager';
+import { createCustomCollection, deleteCustomCollection, getCustomCollections, getRecipesFromCustomCollection } from '../utils/favoritesManager';
 
 const { width } = Dimensions.get('window');
 
@@ -110,18 +108,28 @@ export default function ProfileScreen() {
   };
 
   const fetchProfileData = async () => {
-    if (!isSignedIn || !userId) return;
+    if (!isSignedIn || !userId) {
+      console.log('Cannot fetch profile: not signed in or no userId');
+      return;
+    }
     setLoading(true);
     setFetchError(null);
     let backendUser = null;
     let debugInfo = { userId, url: API_URLS.USERS.BY_ID(userId), response: null, error: null };
+    
     try {
+      console.log('Starting profile data fetch for userId:', userId);
+      
       // Obtener token de Clerk
       const token = await getToken();
+      console.log('Clerk token obtained:', token ? 'Yes' : 'No');
       const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
+      
       // 1. Get user profile from backend (con token)
+      console.log('Fetching user profile from:', API_URLS.USERS.BY_ID(userId));
       const userRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId), { headers: { ...authHeaders } });
       debugInfo.response = userRes;
+      console.log('User API response:', { success: userRes.success, status: userRes.status, hasData: !!userRes.data });
       // Fallback robusto: si el backend responde mal, usar cualquier dato que venga en data
       if (userRes.data && userRes.data.data) {
         backendUser = userRes.data.data;
@@ -239,11 +247,25 @@ export default function ProfileScreen() {
       setUserCollections(customCollections);
       setFetchDebug(prev => ({ ...prev, collectionsRes }));
     } catch (e) {
+      console.error('Profile fetch error:', e);
       debugInfo.error = e.message || e.toString();
       setFetchDebug(debugInfo);
-      setFetchError('No se pudieron cargar tus datos. Se mostrarán los datos de tu cuenta de Clerk.');
+      
+      // Determinar el tipo de error específico
+      let errorMessage = 'No se pudieron cargar tus datos.';
+      if (e.message?.includes('Failed to fetch') || e.message?.includes('Network')) {
+        errorMessage = 'Error de conexión. Verifica tu internet.';
+      } else if (e.message?.includes('401') || e.message?.includes('Unauthorized')) {
+        errorMessage = 'Error de autenticación. Intenta cerrar sesión y volver a entrar.';
+      } else if (e.message?.includes('500')) {
+        errorMessage = 'Error del servidor. Intenta de nuevo más tarde.';
+      }
+      
+      setFetchError(errorMessage + ' Se mostrarán los datos de tu cuenta de Clerk.');
+      
       // Fallback: mostrar datos de Clerk
       if (user) {
+        console.log('Using Clerk fallback data for user:', user.id);
         setUserData({
           id: user.id,
           username: user.username,
@@ -277,20 +299,6 @@ export default function ProfileScreen() {
       }
     };
     
-    // Listener global para refrescar recetas modificadas
-    global.refreshChangedRecipes = loadChangedRecipes;
-    // Listener de AppState para refrescar al volver al perfil
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        fetchProfileData();
-        loadChangedRecipes();
-      }
-    });
-    return () => {
-      global.refreshProfileFavorites = undefined;
-      global.refreshChangedRecipes = undefined;
-      subscription.remove();
-    };
   }, [isSignedIn, userId]);
 
   useEffect(() => {
@@ -864,7 +872,7 @@ export default function ProfileScreen() {
             <Ionicons name="trash" size={40} color="#ef4444" style={{ marginBottom: 12 }} />
             <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>¿Desea eliminar?</Text>
             <Text style={{ color: '#666', marginBottom: 20, textAlign: 'center' }}>
-              Esta acción enviará una solicitud al administrador para eliminar la receta "{recipeToDelete?.title}". ¿Desea continuar?
+              Esta acción enviará una solicitud al administrador para eliminar la receta &quot;{recipeToDelete?.title}&quot;. ¿Desea continuar?
             </Text>
             <View style={{ flexDirection: 'row', gap: 16 }}>
               <TouchableOpacity onPress={() => setDeleteModalVisible(false)} style={{ padding: 10, borderRadius: 8, backgroundColor: '#e0e0e0', marginRight: 8 }}>

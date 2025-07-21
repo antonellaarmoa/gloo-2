@@ -1,32 +1,30 @@
-import React, { useState, useEffect } from 'react';
+import { useAuth } from '@clerk/clerk-expo';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import * as FileSystem from 'expo-file-system';
+import * as ImageManipulator from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import { VideoView, useVideoPlayer } from 'expo-video';
+import React, { useEffect, useState } from 'react';
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Alert,
-  Modal,
-  ActivityIndicator,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import DraggableFlatList from 'react-native-draggable-flatlist';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '@clerk/clerk-expo';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_URLS } from '../../config/api';
-import { useFocusEffect } from '@react-navigation/native';
-import * as ImageManipulator from 'expo-image-manipulator';
-import { useVideoPlayer, VideoView } from 'expo-video';
-import * as DocumentPicker from 'expo-document-picker';
 
 // Función robusta para hacer peticiones a la API
 const makeApiRequest = async (url, options = {}) => {
@@ -286,19 +284,61 @@ export default function CreateRecipeScreen() {
     }
   };
 
-  // Función para convertir imagen local a base64
-  const convertImageToBase64 = async (imageUri) => {
+  // Función para convertir imagen local a base64 con compresión EXTREMA para evitar payload grande
+  const convertImageToBase64 = async (imageUri, maxWidth = 200, quality = 0.1) => {
     try {
-      const base64 = await FileSystem.readAsStringAsync(imageUri, {
+      console.log('Iniciando compresión EXTREMA para evitar payload grande...');
+      
+      // Compresión directa muy agresiva
+      const compressed = await ImageManipulator.manipulateAsync(
+        imageUri,
+        [{ resize: { width: maxWidth } }],
+        { 
+          compress: quality, 
+          format: ImageManipulator.SaveFormat.JPEG 
+        }
+      );
+
+      let base64 = await FileSystem.readAsStringAsync(compressed.uri, {
         encoding: FileSystem.EncodingType.Base64,
       });
-      // Determinar el tipo MIME basado en la extensión del archivo
-      const extension = imageUri.split('.').pop().toLowerCase();
-      let mimeType = 'image/jpeg'; // default
-      if (extension === 'png') mimeType = 'image/png';
-      else if (extension === 'gif') mimeType = 'image/gif';
-      else if (extension === 'webp') mimeType = 'image/webp';
-      return `data:${mimeType};base64,${base64}`;
+      
+      let sizeInKB = (base64.length * 0.75) / 1024;
+      console.log(`Imagen después de compresión extrema: ${sizeInKB.toFixed(2)} KB`);
+      
+      // Objetivo: máximo 100KB para evitar payloads grandes
+      let currentUri = compressed.uri;
+      let currentWidth = maxWidth;
+      let currentQuality = quality;
+      
+      while (sizeInKB > 100 && currentWidth > 80) {
+        currentWidth = Math.max(80, currentWidth * 0.8);
+        currentQuality = Math.max(0.05, currentQuality * 0.8);
+        
+        console.log(`Reduciendo más: ancho=${Math.round(currentWidth)}, calidad=${currentQuality.toFixed(3)}`);
+        
+        const furtherCompressed = await ImageManipulator.manipulateAsync(
+          currentUri,
+          [{ resize: { width: Math.round(currentWidth) } }],
+          { 
+            compress: currentQuality, 
+            format: ImageManipulator.SaveFormat.JPEG 
+          }
+        );
+        
+        base64 = await FileSystem.readAsStringAsync(furtherCompressed.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        
+        sizeInKB = (base64.length * 0.75) / 1024;
+        currentUri = furtherCompressed.uri;
+        
+        console.log(`Nuevo tamaño: ${sizeInKB.toFixed(2)} KB`);
+      }
+      
+      console.log(`Imagen procesada para payload: ${sizeInKB.toFixed(2)} KB`);
+      return `data:image/jpeg;base64,${base64}`;
+      
     } catch (error) {
       console.error('Error converting image to base64:', error);
       return null;
@@ -423,88 +463,66 @@ export default function CreateRecipeScreen() {
     }
   };
 
-  const MAX_FILE_SIZE_MB = 30;
+  const MAX_FILE_SIZE_MB = 10; // Límite reducido para evitar problemas de payload
 
   const pickMediaType = async (type, index = null) => {
-    let mediaTypes = ImagePicker.MediaTypeOptions.All;
-    if (type === 'image') mediaTypes = ImagePicker.MediaTypeOptions.Images;
-    if (type === 'video') mediaTypes = ImagePicker.MediaTypeOptions.Videos;
+    // Solo permitir imágenes para evitar problemas de tamaño
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 1,
+      quality: 0.7,
     });
+    
     if (!result.canceled && result.assets?.length > 0) {
       let uri = result.assets[0].uri;
+      
       // Verifica si el archivo existe
       const fileInfo = await FileSystem.getInfoAsync(uri);
       if (!fileInfo.exists) {
         Alert.alert('Error', 'El archivo seleccionado ya no está disponible. Por favor, selecciona otro.');
         return;
       }
-      // Limita el tamaño del archivo a 30MB
-      if (fileInfo.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
-        Alert.alert('Error', 'El archivo es demasiado grande. Selecciona uno menor a 30MB.');
+      
+      // Límite más conservador para imágenes de pasos
+      if (fileInfo.size > 8 * 1024 * 1024) { // 8MB para imágenes de pasos
+        Alert.alert('Error', 'El archivo es demasiado grande. Selecciona una imagen menor a 8MB.');
         return;
       }
-      // Detecta si es imagen o video
-      const extension = uri.split('.').pop().toLowerCase();
-      const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(extension);
-      const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(extension);
-      let base64 = null;
-      if (isImage) {
-        // Comprime y redimensiona la imagen antes de convertir a base64
-        try {
-          const manipulated = await ImageManipulator.manipulateAsync(
-            uri,
-            [{ resize: { width: 720 } }],
-            { compress: 0.2, format: ImageManipulator.SaveFormat.JPEG }
-          );
-          uri = manipulated.uri;
-        } catch (e) {
-          console.error('Error al comprimir la imagen:', e);
-          Alert.alert('Error', 'No se pudo comprimir la imagen. Intenta con otra.');
+
+      try {
+        console.log('Procesando imagen de paso, tamaño original:', (fileInfo.size / (1024 * 1024)).toFixed(2), 'MB');
+        
+        // Usar compresión EXTREMA para imágenes de pasos (máximo 80KB)
+        const base64 = await convertImageToBase64(uri, 150, 0.05);
+        
+        if (!base64) {
+          Alert.alert('Error', 'No se pudo procesar la imagen. Intenta nuevamente.');
           return;
         }
-        base64 = await convertImageToBase64(uri); // ya incluye el mime-type correcto
-      } else if (isVideo) {
-        try {
-          const videoBase64 = await FileSystem.readAsStringAsync(uri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-          let mimeType = 'video/mp4';
-          if (extension === 'mov') mimeType = 'video/quicktime';
-          else if (extension === 'webm') mimeType = 'video/webm';
-          else if (extension === 'avi') mimeType = 'video/x-msvideo';
-          else if (extension === 'mkv') mimeType = 'video/x-matroska';
-          base64 = `data:${mimeType};base64,${videoBase64}`;
-        } catch (e) {
-          console.error('Error al procesar el video:', e);
-          Alert.alert('Error', 'No se pudo procesar el video. Intenta nuevamente.');
+
+        // Verificar tamaño final en KB
+        const finalSizeInKB = (base64.length * 0.75) / 1024;
+        console.log(`Tamaño final de imagen de paso: ${finalSizeInKB.toFixed(2)} KB`);
+        
+        if (finalSizeInKB > 100) {
+          Alert.alert('Imagen demasiado grande', 'La imagen procesada es muy grande. Selecciona una imagen más pequeña.');
           return;
         }
-      } else {
-        Alert.alert('Error', 'Solo se permiten imágenes o videos.');
+
+        if (index === null) {
+          setRecipeImage(base64);
+        } else {
+          const updatedSteps = [...steps];
+          if (updatedSteps[index]) {
+            updatedSteps[index].media = base64;
+            setSteps(updatedSteps);
+          }
+        }
+      } catch (e) {
+        console.error('Error al procesar la imagen:', e);
+        Alert.alert('Error', 'No se pudo procesar la imagen. Intenta con otra.');
         return;
-      }
-      if (!base64) {
-        Alert.alert('Error', 'No se pudo procesar el archivo. Intenta nuevamente.');
-        return;
-      }
-      if (index === null) {
-        setRecipeImage(base64);
-      } else {
-        // Solo permitir imágenes en los pasos
-        if (!isImage) {
-          Alert.alert('Error', 'Solo se permiten imágenes en los pasos.');
-          return;
-        }
-        const updatedSteps = [...steps];
-        if (updatedSteps[index]) {
-          updatedSteps[index].media = base64;
-          setSteps(updatedSteps);
-        }
       }
     }
   };
@@ -513,10 +531,10 @@ export default function CreateRecipeScreen() {
   const pickMedia = async () => {
     // Usar ImagePicker para acceder a la galería
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.All, // Permitir imágenes y videos
+      mediaTypes: ImagePicker.MediaTypeOptions.Images, // Solo imágenes para evitar problemas de tamaño
       allowsEditing: true,
       aspect: [4, 3],
-      quality: 1, // Usar calidad 1 para que la compresión posterior sea predecible
+      quality: 0.8, // Reducir calidad inicial
     });
 
     if (result.canceled || !result.assets || result.assets.length === 0) {
@@ -532,51 +550,44 @@ export default function CreateRecipeScreen() {
       Alert.alert('Error', 'El archivo seleccionado no está disponible.');
       return;
     }
-    if (fileInfo.size > 30 * 1024 * 1024) { // Límite de 30MB
-      Alert.alert('Archivo demasiado grande', 'El archivo no puede superar los 30MB.');
+    
+    // Límite más conservador para archivos iniciales
+    if (fileInfo.size > 10 * 1024 * 1024) { // Límite de 10MB
+      Alert.alert('Archivo demasiado grande', 'El archivo no puede superar los 10MB. Por favor, selecciona una imagen más pequeña.');
       return;
     }
 
-    // 2. Procesar y convertir a Base64
-    let base64 = null;
-    const isVideo = asset.type === 'video' || uri.endsWith('.mp4') || uri.endsWith('.mov');
+    // 2. Procesar imagen con compresión optimizada
+    setMediaType('image');
+          try {
+        console.log('Procesando imagen original de tamaño:', (fileInfo.size / (1024 * 1024)).toFixed(2), 'MB');
+        
+        // Usar compresión EXTREMA para imagen principal (máximo 100KB)
+        const base64 = await convertImageToBase64(uri, 200, 0.1);
+        
+        if (!base64) {
+          Alert.alert('Error', 'No se pudo procesar la imagen. Intenta con otra.');
+          return;
+        }
 
-    if (isVideo) {
-      setMediaType('video');
-      try {
-        const videoBase64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        const extension = uri.split('.').pop().toLowerCase();
-        let mimeType = 'video/mp4';
-        if (extension === 'mov') mimeType = 'video/quicktime';
-        base64 = `data:${mimeType};base64,${videoBase64}`;
-      } catch (e) {
-        console.error('Error procesando el video a Base64:', e);
-        Alert.alert('Error', 'No se pudo procesar el video. Intenta con otro.');
-        return;
-      }
-    } else { // Es una imagen
-      setMediaType('image');
-      try {
-        const manipulated = await ImageManipulator.manipulateAsync(
-          uri,
-          [{ resize: { width: 800 } }], // Redimensionar para optimizar
-          { compress: 0.7, format: ImageManipulator.SaveFormat.JPEG }
-        );
-        base64 = await convertImageToBase64(manipulated.uri); // Esta función ya añade el `data:image/jpeg;base64,`
-      } catch (e) {
-        console.error('Error procesando la imagen a Base64:', e);
-        Alert.alert('Error', 'No se pudo procesar la imagen. Intenta con otra.');
-        return;
-      }
-    }
+        // Verificar tamaño final del base64 en KB
+        const finalSizeInKB = (base64.length * 0.75) / 1024;
+        console.log(`Tamaño final de la imagen: ${finalSizeInKB.toFixed(2)} KB`);
+        
+        if (finalSizeInKB > 150) {
+          Alert.alert(
+            'Imagen demasiado grande', 
+            'La imagen procesada aún es muy grande. Por favor, selecciona una imagen más pequeña.'
+          );
+          return;
+        }
 
-    // 3. Guardar el resultado en el estado
-    if (base64) {
-      setRecipeImage(base64);
-    } else {
-      Alert.alert('Error', 'No se pudo obtener el contenido del archivo.');
+        setRecipeImage(base64);
+        
+      } catch (e) {
+      console.error('Error procesando la imagen:', e);
+      Alert.alert('Error', 'No se pudo procesar la imagen. Intenta con otra.');
+      return;
     }
   };
 
@@ -690,37 +701,297 @@ export default function CreateRecipeScreen() {
     setIsPublishing(true);
 
     try {
-      // Prepara el payload como JSON
-      const payload = {
-        title: title.trim(),
-        description: description.trim(),
-        estimatedTime: (parseInt(prepTime) + parseInt(cookTime) || 30),
-        servings: (parseInt(cookTime) || 4),
-        ingredients,
-        instructions: steps.map(step => ({
-          description: step.text,
-          image: null // o step.media si quieres soportar imágenes en pasos
-        })),
-        media: recipeImage,
-        status: 'pending'
+      // Validar y limpiar campos numéricos con tipos exactos
+      const prepTimeNum = parseInt(prepTime) || 0;
+      const servingsNum = parseInt(cookTime) || 4; // cookTime se usa como servings en este contexto
+      
+      // Asegurar valores válidos y positivos
+      const estimatedTime = Math.max(1, Math.min(600, prepTimeNum > 0 ? prepTimeNum : 30)); // Entre 1 y 600 minutos
+      const servings = Math.max(1, Math.min(20, servingsNum)); // Entre 1 y 20 porciones
+      
+      console.log('Campos numéricos validados:', { estimatedTime, servings, prepTimeNum, servingsNum });
+
+      // Función para sanitizar texto y evitar caracteres problemáticos en JSON
+      const sanitizeText = (text) => {
+        if (!text || typeof text !== 'string') return '';
+        return text
+          .trim()
+          .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // Remover caracteres de control
+          .replace(/[""'']/g, '"') // Normalizar comillas
+          .replace(/[\r\n\t]/g, ' ') // Reemplazar saltos de línea y tabs con espacios
+          .replace(/\s+/g, ' ') // Múltiples espacios a uno solo
+          .slice(0, 1000); // Limitar longitud para evitar textos muy largos
       };
 
-      const token = await getToken();
-      const url = API_URLS.RECIPES.CREATE(userId);
+      // Limpiar ingredientes con validación estricta y sanitización
+      const cleanIngredients = ingredients.map(ingredient => {
+        const cleaned = {
+          name: sanitizeText(ingredient.name) || 'Ingrediente',
+          quantity: parseFloat(ingredient.quantity) || 1,
+          unit: sanitizeText(ingredient.unit) || ''
+        };
+        
+        // Asegurar que quantity sea un número válido
+        if (isNaN(cleaned.quantity) || cleaned.quantity <= 0) {
+          cleaned.quantity = 1;
+        }
+        
+        return cleaned;
+      }).filter(ingredient => ingredient.name.trim()); // Filtrar ingredientes sin nombre
 
+      // Limpiar instrucciones con la estructura correcta y sanitización
+      const cleanInstructions = validSteps.map((step, index) => ({
+        step: index + 1,
+        description: sanitizeText(step.text) || '',
+        image: step.media || null  // El backend puede manejar null en instrucciones
+      }));
+
+      // Crear payload simplificado para evitar problemas de parsing
+      const payload = {
+        title: sanitizeText(title) || 'Receta sin título',
+        description: sanitizeText(description) || 'Sin descripción',
+        estimatedTime: Number(estimatedTime),
+        servings: Number(servings),
+        ingredients: cleanIngredients,
+        instructions: cleanInstructions,
+        userId: userId, // Asegurar que userId esté incluido
+        status: 'pending'
+      };
+      
+      // Debug: crear un payload super simple para probar si el problema es la estructura
+      const simplePayload = {
+        title: "Test Recipe",
+        description: "Test Description", 
+        estimatedTime: 30,
+        servings: 4,
+        ingredients: [{ name: "Test Ingredient", quantity: 1, unit: "unit" }],
+        instructions: [{ step: 1, description: "Test instruction", image: null }],
+        userId: userId, // Incluir userId también en payload simple
+        status: "pending"
+      };
+      
+      console.log('Payload original vs simple:');
+      console.log('Original ingredients count:', payload.ingredients.length);
+      console.log('Original instructions count:', payload.instructions.length);
+      console.log('Simple payload:', JSON.stringify(simplePayload));
+      
+      // Usar el payload original por ahora, pero tener el simple como backup
+      let finalPayload = payload;
+
+      // Solo agregar media si existe y es válida
+              if (recipeImage && recipeImage.trim()) {
+          try {
+            // Validar que la imagen base64 esté bien formada
+            if (recipeImage.startsWith('data:image/')) {
+              // Verificar que el base64 sea válido
+              const base64Part = recipeImage.split(',')[1];
+              if (base64Part) {
+                // Verificar que sea base64 válido
+                const decoded = atob(base64Part.substring(0, 100)); // Solo verificar los primeros 100 caracteres
+                finalPayload.media = recipeImage;
+                console.log('Imagen base64 válida agregada al payload, tamaño:', recipeImage.length, 'caracteres');
+              }
+            }
+          } catch (base64Error) {
+            console.error('Error validando imagen base64:', base64Error);
+            console.warn('Imagen inválida, enviando receta sin imagen');
+            // No incluir la imagen si está mal formada
+          }
+        }
+
+      // Validación final del payload
+      if (!finalPayload.title || finalPayload.title.length === 0) {
+        throw new Error('Título es requerido');
+      }
+      if (!finalPayload.description || finalPayload.description.length === 0) {
+        throw new Error('Descripción es requerida');
+      }
+      if (!finalPayload.ingredients || finalPayload.ingredients.length === 0) {
+        throw new Error('Al menos un ingrediente es requerido');
+      }
+      if (!finalPayload.instructions || finalPayload.instructions.length === 0) {
+        throw new Error('Al menos una instrucción es requerida');
+      }
+
+      // Validar que el JSON sea serializable antes de enviarlo
+      let payloadString;
+      try {
+        payloadString = JSON.stringify(finalPayload);
+        console.log('JSON válido generado, tamaño:', payloadString.length, 'caracteres');
+        
+        // Verificar caracteres problemáticos adicionales
+        const problematicChars = payloadString.match(/[\u0000-\u001F\u007F-\u009F]/g);
+        if (problematicChars) {
+          console.warn('Caracteres problemáticos encontrados:', problematicChars);
+          // Limpiar caracteres problemáticos
+          payloadString = payloadString.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+          console.log('Caracteres problemáticos removidos, nuevo tamaño:', payloadString.length);
+        }
+        
+        // Verificar que se puede volver a parsear (validación de ida y vuelta)
+        const testParse = JSON.parse(payloadString);
+        console.log('JSON validation passed - payload puede ser parseado correctamente');
+        
+        // Verificar estructura del JSON parseado
+        if (!testParse.title || !testParse.description || !testParse.ingredients || !testParse.instructions) {
+          throw new Error('Estructura del payload inválida después de la serialización');
+        }
+        
+      } catch (jsonError) {
+        console.error('Error validando JSON del payload:', jsonError);
+        throw new Error('Los datos contienen caracteres inválidos que impiden crear el JSON');
+      }
+
+      console.log('Payload final validado a enviar:', JSON.stringify(finalPayload, null, 2));
+
+      // Validar tamaño total del payload antes de enviarlo (ya tenemos payloadString)
+      const payloadSizeInKB = (payloadString.length) / 1024;
+      const payloadSizeInMB = payloadSizeInKB / 1024;
+      console.log(`Tamaño total del payload: ${payloadSizeInKB.toFixed(2)} KB (${payloadSizeInMB.toFixed(2)} MB)`);
+      
+      if (payloadSizeInMB > 2) { // Límite de 2MB para el payload completo con imágenes comprimidas
+        Alert.alert(
+          'Receta demasiado grande',
+          'La receta es demasiado grande para enviar. Por favor, reduce el número de imágenes o pasos.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      const token = await getToken();
+      // Usar directamente la URL correcta que incluye userId
+      let url = API_URLS.RECIPES.CREATE(userId);
+      const originalUrl = url; // Guardar URL original para fallback
+
+      console.log('URL del endpoint:', url);
+      console.log('Token disponible:', !!token);
+
+      // Usar el payloadString que ya validamos en lugar de volver a serializar
+      console.log('Enviando payload con tamaño:', payloadString.length, 'caracteres');
+      console.log('Primeros 200 caracteres del payload:', payloadString.substring(0, 200));
+      
       const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(payload),
+        body: payloadString, // Usar la cadena JSON ya validada
       });
 
-      const result = await response.json();
+      console.log('Response status:', response.status);
+      console.log('Response ok:', response.ok);
+
+      let result;
+      const responseText = await response.text();
+      console.log('Raw response text:', responseText);
+      
+      try {
+        result = JSON.parse(responseText);
+        console.log('Parsed response data:', result);
+      } catch (parseError) {
+        console.error('Error parsing response JSON:', parseError);
+        console.error('Response was:', responseText);
+        result = { error: 'Invalid response from server', rawResponse: responseText };
+      }
 
       if (!response.ok) {
-        throw new Error(result.error || 'Error al publicar la receta');
+        console.error('Request failed with status:', response.status);
+        console.error('Response headers:', Object.fromEntries(response.headers));
+        console.error('Error details:', result);
+        
+        // Log más detalles para ayudar con debugging
+        if (response.status === 500) {
+          console.error('Server error 500 - detalles del payload enviado:');
+          console.error('- URL:', url);
+          console.error('- Method: POST');
+          console.error('- Headers:', { 'Authorization': '***', 'Content-Type': 'application/json' });
+          console.error('- Body length:', payloadString.length);
+          
+          // Intentar con payload simple para debugging
+          console.log('Intentando con payload simplificado para debugging...');
+          try {
+            const simplePayloadString = JSON.stringify(simplePayload);
+            const simpleResponse = await fetch(url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: simplePayloadString,
+            });
+            
+            const simpleResult = await simpleResponse.text();
+            console.log('Resultado con payload simple:', simpleResponse.status, simpleResult);
+            
+            if (simpleResponse.ok) {
+              console.log('Payload simple funcionó - el problema está en los datos complejos');
+            } else {
+              console.log('Payload simple también falló - intentando con URL original...');
+              
+              // Probar con URL original si la simple también falla
+              const originalResponse = await fetch(originalUrl, {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json'
+                },
+                body: simplePayloadString,
+              });
+              
+              const originalResult = await originalResponse.text();
+              console.log('Resultado con URL original:', originalResponse.status, originalResult);
+              
+              if (originalResponse.ok) {
+                console.log('URL original funcionó - usar esa para el payload real');
+                url = originalUrl; // Cambiar a URL original para siguiente intento
+              } else {
+                console.log('Ambas URLs fallaron - problema más profundo');
+              }
+            }
+          } catch (simpleError) {
+            console.error('Error con payload simple:', simpleError);
+          }
+        }
+        
+        // Si determinamos que debemos usar la URL original, reintentamos
+        if (url !== originalUrl && response.status === 500) {
+          console.log('Reintentando con URL original después del test...');
+          url = originalUrl;
+          
+          const retryResponse = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: payloadString,
+          });
+          
+          const retryResponseText = await retryResponse.text();
+          console.log('Resultado del reintento:', retryResponse.status, retryResponseText);
+          
+          if (retryResponse.ok) {
+            try {
+              const retryResult = JSON.parse(retryResponseText);
+              console.log('¡Reintento exitoso con URL original!');
+              result = retryResult;
+              response = retryResponse; // Actualizar response para el flujo de éxito
+            } catch (retryParseError) {
+              console.error('Error parsing retry response:', retryParseError);
+              throw new Error('Reintento exitoso pero respuesta inválida');
+            }
+          } else {
+            throw new Error('Reintento también falló');
+          }
+        } else {
+          throw new Error(result.error || result.message || `Error ${response.status}: Error al publicar la receta`);
+        }
+      }
+      
+      // Verificar si llegamos aquí exitosamente después del reintento
+      if (!response.ok) {
+        throw new Error(result.error || result.message || `Error ${response.status}: Error al publicar la receta`);
       }
 
       // El resto del flujo de éxito...
@@ -736,6 +1007,7 @@ export default function CreateRecipeScreen() {
           }
         ]
       );
+      
       // Limpiar campos SIEMPRE después de publicar
       setTitle('');
       setDescription('');
@@ -753,11 +1025,25 @@ export default function CreateRecipeScreen() {
 
     } catch (error) {
       console.error('Error publishing recipe:', error);
-      Alert.alert(
-        "Error",
-        "No se pudo publicar la receta. Por favor, intenta nuevamente.",
-        [{ text: "OK" }]
-      );
+      
+      // Mostrar mensaje de error más específico según el tipo de error
+      let errorMessage = 'No se pudo publicar la receta. Por favor, intenta nuevamente.';
+      let errorTitle = "Error";
+      
+      if (error.message && error.message.includes('JSON')) {
+        errorTitle = "Error de formato";
+        errorMessage = 'Hay un problema con el formato de los datos. Por favor, revisa que no haya caracteres especiales en el título, descripción o ingredientes.';
+      } else if (error.message && error.message.includes('500')) {
+        errorTitle = "Error del servidor";
+        errorMessage = 'Hay un problema temporal en el servidor. Por favor, intenta nuevamente en unos momentos.';
+      } else if (error.message && error.message.includes('caracteres inválidos')) {
+        errorTitle = "Caracteres inválidos";
+        errorMessage = 'El texto contiene caracteres especiales que no son permitidos. Por favor, revisa el título, descripción e ingredientes.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      Alert.alert(errorTitle, errorMessage, [{ text: "OK" }]);
     } finally {
       setIsPublishing(false);
     }

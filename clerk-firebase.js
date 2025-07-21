@@ -15,12 +15,13 @@ export const getFirebaseToken = async (clerkToken) => {
 
 // Initialize Firebase auth with Clerk
 export const initializeClerkFirebase = () => {
-  // This prevents the getToken warnings by providing a proper integration
+  // COMENTADO: Esta función está interfiriendo con getToken de Clerk
+  // y causando que siempre retorne null
   return {
-    getToken: async () => {
-      // Return a promise that resolves to null to prevent warnings
-      return Promise.resolve(null);
-    },
+    // getToken: async () => {
+    //   // Return a promise that resolves to null to prevent warnings
+    //   return Promise.resolve(null);
+    // },
     signInWithCustomToken: async (token) => {
       try {
         const result = await signInWithCustomToken(auth, token);

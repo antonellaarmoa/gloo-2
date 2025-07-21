@@ -109,6 +109,8 @@ export const API_URLS = {
     FOLLOW: (followerId, followingId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${followerId}/follow/${followingId}`),
     UNFOLLOW: (followerId, followingId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${followerId}/unfollow/${followingId}`),
     STATUS: (followerId, followingId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${followerId}/status/${followingId}`),
+    FOLLOWERS: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/followers`),
+    FOLLOWING: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.FOLLOWS}/${userId}/following`),
   },
   SEARCH: {
     RECIPES: (query) => buildApiUrl(`${API_CONFIG.ENDPOINTS.SEARCH}/recipes?q=${query}`),
@@ -116,10 +118,11 @@ export const API_URLS = {
   },
   COLLECTIONS: {
     GET_ALL: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/collections`),
+    BY_USER: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/collections`),
     CREATE: (userId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/collection`),
     GET_BY_ID: (collectionId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${collectionId}`),
     UPDATE: (collectionId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${collectionId}`),
-    DELETE: (collectionId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${collectionId}`),
+    DELETE: (userId, collectionId) => buildApiUrl(`${API_CONFIG.ENDPOINTS.COLLECTIONS}/${userId}/collections/${collectionId}`),
   },
   INGREDIENTS: {
     GET_ALL: () => buildApiUrl(API_CONFIG.ENDPOINTS.INGREDIENTS),
