@@ -48,23 +48,28 @@ function RootLayoutWithRedirect() {
   useEffect(() => {
     if (!isReady || !fontsLoaded || !userLoaded) return;
     
-    // Agregar un pequeño delay para asegurar que todo esté listo
-    const timer = setTimeout(() => {
-      if (pathname === '/') {
+    // Solo redirigir si estamos en la ruta raíz
+    if (pathname === '/') {
+      console.log('Redirecting from root:', { isSignedIn, userRole: user?.publicMetadata?.role });
+      // Agregar un pequeño delay para asegurar que todo esté listo
+      const timer = setTimeout(() => {
         if (isSignedIn) {
           if (user && user.publicMetadata?.role === 'admin') {
-            router.replace('/(admin)/(tabs)/notifications');
+            console.log('Redirecting admin to /(admin)');
+            router.replace('/(admin)');
           } else {
+            console.log('Redirecting user to /(tabs)/home');
             router.replace('/(tabs)/home');
           }
         } else {
+          console.log('Redirecting to onboarding');
           // Si no está autenticado, ir a onboarding
           router.replace('/onboarding');
         }
-      }
-    }, 100);
+      }, 100);
 
-    return () => clearTimeout(timer);
+      return () => clearTimeout(timer);
+    }
   }, [isReady, fontsLoaded, userLoaded, user, pathname, router, isSignedIn]);
 
   if (fontError) {
@@ -76,7 +81,7 @@ function RootLayoutWithRedirect() {
     );
   }
 
-  if (!fontsLoaded || !userLoaded || !isReady || pathname === '/') {
+  if (!fontsLoaded || !userLoaded || !isReady) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' }}>
         <ActivityIndicator size="large" color="#f97316" />

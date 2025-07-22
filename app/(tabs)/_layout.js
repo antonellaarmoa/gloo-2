@@ -14,12 +14,19 @@ export default function TabLayout() {
 
   useEffect(() => {
     if (!isLoaded || !userLoaded) return;
+    
+    console.log('Tabs layout checking:', { isSignedIn, userRole: user?.publicMetadata?.role, isChecking });
+    
+    // Solo verificar una vez cuando todo esté cargado
     if (isSignedIn && user?.publicMetadata?.role === 'admin') {
-      router.replace('/(admin)/notifications');
+      console.log('Tabs layout redirecting admin to /(admin)');
+      router.replace('/(admin)');
       return;
     }
+    
+    console.log('Tabs layout setting isChecking to false');
     setIsChecking(false);
-  }, [isSignedIn, isLoaded, user, userLoaded, router]);
+  }, [isLoaded, userLoaded]); // Removemos las dependencias que pueden causar bucles
 
   if (!isLoaded || !userLoaded || isChecking) {
     return (

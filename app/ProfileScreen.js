@@ -1,28 +1,30 @@
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ScrollView,
+  ActivityIndicator,
+  Dimensions,
+  Alert,
+  AppState,
+  FlatList,
+  TextInput,
+  Modal,
+  Platform,
+  ToastAndroid,
+} from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import {
-    ActivityIndicator,
-    Alert,
-    Dimensions,
-    FlatList,
-    Image,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    ToastAndroid,
-    TouchableOpacity,
-    View
-} from 'react-native';
-import MenuModal from '../components/MenuModal';
 import RecipeCard from '../components/RecipeCard';
+import MenuModal from '../components/MenuModal';
 import ShareProfileModal from '../components/ShareProfileModal';
 import { API_URLS } from '../config/api';
-import { createCustomCollection, deleteCustomCollection, getCustomCollections, getRecipesFromCustomCollection } from '../utils/favoritesManager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createCustomCollection, getCustomCollections, getRecipesFromCustomCollection, deleteCustomCollection } from '../utils/favoritesManager';
 
 const { width } = Dimensions.get('window');
 
@@ -108,28 +110,18 @@ export default function ProfileScreen() {
   };
 
   const fetchProfileData = async () => {
-    if (!isSignedIn || !userId) {
-      console.log('Cannot fetch profile: not signed in or no userId');
-      return;
-    }
+    if (!isSignedIn || !userId) return;
     setLoading(true);
     setFetchError(null);
     let backendUser = null;
     let debugInfo = { userId, url: API_URLS.USERS.BY_ID(userId), response: null, error: null };
-    
     try {
-      console.log('Starting profile data fetch for userId:', userId);
-      
       // Obtener token de Clerk
       const token = await getToken();
-      console.log('Clerk token obtained:', token ? 'Yes' : 'No');
       const authHeaders = token ? { 'Authorization': `Bearer ${token}` } : {};
-      
       // 1. Get user profile from backend (con token)
-      console.log('Fetching user profile from:', API_URLS.USERS.BY_ID(userId));
       const userRes = await makeApiRequest(API_URLS.USERS.BY_ID(userId), { headers: { ...authHeaders } });
       debugInfo.response = userRes;
-      console.log('User API response:', { success: userRes.success, status: userRes.status, hasData: !!userRes.data });
       // Fallback robusto: si el backend responde mal, usar cualquier dato que venga en data
       if (userRes.data && userRes.data.data) {
         backendUser = userRes.data.data;
@@ -247,25 +239,11 @@ export default function ProfileScreen() {
       setUserCollections(customCollections);
       setFetchDebug(prev => ({ ...prev, collectionsRes }));
     } catch (e) {
-      console.error('Profile fetch error:', e);
       debugInfo.error = e.message || e.toString();
       setFetchDebug(debugInfo);
-      
-      // Determinar el tipo de error específico
-      let errorMessage = 'No se pudieron cargar tus datos.';
-      if (e.message?.includes('Failed to fetch') || e.message?.includes('Network')) {
-        errorMessage = 'Error de conexión. Verifica tu internet.';
-      } else if (e.message?.includes('401') || e.message?.includes('Unauthorized')) {
-        errorMessage = 'Error de autenticación. Intenta cerrar sesión y volver a entrar.';
-      } else if (e.message?.includes('500')) {
-        errorMessage = 'Error del servidor. Intenta de nuevo más tarde.';
-      }
-      
-      setFetchError(errorMessage + ' Se mostrarán los datos de tu cuenta de Clerk.');
-      
+      setFetchError('No se pudieron cargar tus datos. Se mostrarán los datos de tu cuenta de Clerk.');
       // Fallback: mostrar datos de Clerk
       if (user) {
-        console.log('Using Clerk fallback data for user:', user.id);
         setUserData({
           id: user.id,
           username: user.username,
@@ -299,6 +277,20 @@ export default function ProfileScreen() {
       }
     };
     
+    // Listener global para refrescar recetas modificadas
+    global.refreshChangedRecipes = loadChangedRecipes;
+    // Listener de AppState para refrescar al volver al perfil
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        fetchProfileData();
+        loadChangedRecipes();
+      }
+    });
+    return () => {
+      global.refreshProfileFavorites = undefined;
+      global.refreshChangedRecipes = undefined;
+      subscription.remove();
+    };
   }, [isSignedIn, userId]);
 
   useEffect(() => {
@@ -373,10 +365,27 @@ export default function ProfileScreen() {
           'Authorization': `Bearer ${token}`,
         },
       });
-      if (!res.ok) throw new Error('No se pudo eliminar la receta');
-      Alert.alert('Receta eliminada', 'La receta fue eliminada exitosamente.');
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        if (res.status === 403) {
+          Alert.alert('Error', 'No tienes permisos para eliminar esta receta.');
+        } else if (res.status === 400) {
+          Alert.alert('Error', data.error || 'No se pudo procesar la solicitud.');
+        } else {
+          throw new Error(data.error || 'No se pudo eliminar la receta');
+        }
+        return;
+      }
+      
+      Alert.alert(
+        'Receta eliminada', 
+        'La receta fue eliminada exitosamente.'
+      );
       fetchProfileData();
     } catch (error) {
+      console.error('Error deleting recipe:', error);
       Alert.alert('Error', 'No se pudo eliminar la receta.');
     } finally {
       setRecipeToDelete(null);
@@ -508,124 +517,193 @@ export default function ProfileScreen() {
   };
 
   // 1. Crea la función renderProfileHeader
-  const renderProfileHeader = () => {
-    console.log('BIO Clerk publicMetadata:', user?.publicMetadata?.bio, 'bio:', user?.bio);
-    console.log('USER Clerk:', user);
-    console.log('USER publicMetadata:', user?.publicMetadata);
-    console.log('USER unsafeMetadata:', user?.unsafeMetadata);
-    return (
-      <>
-        <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
-          <Feather name="menu" size={20} color="white" />
+  const renderProfileHeader = () => (
+    <>
+      <TouchableOpacity style={styles.menuButton} onPress={() => setMenuVisible(true)}>
+        <Feather name="menu" size={20} color="white" />
+      </TouchableOpacity>
+      <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
+      <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
+        <Image source={getUserProfileImage()} style={styles.avatar} />
+      </TouchableOpacity>
+      <Text style={styles.name}>{getUserDisplayName()}</Text>
+      <Text style={styles.username}>{getUserUsername()}</Text>
+      <Text style={styles.bio}>{getUserBio()}</Text>
+      <View style={styles.statsContainer}>
+        <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')} activeOpacity={0.7}>
+          <Text style={styles.statNumber}>{userRecipes.length > 0 ? userRecipes.length : userStats.recipes}</Text>
+          <Text style={styles.statLabel}>Recetas</Text>
         </TouchableOpacity>
-        <MenuModal visible={menuVisible} onClose={() => setMenuVisible(false)} />
-        <TouchableOpacity onPress={handleAccountDetailsPress} style={styles.avatarContainer}>
-          <Image source={user && user.imageUrl ? { uri: user.imageUrl } : require('../assets/user.jpeg')} style={styles.avatar} />
+        <TouchableOpacity style={styles.statBox} onPress={handleFollowingPress} activeOpacity={0.7}>
+          <Text style={styles.statNumber}>{following.length > 0 ? following.length : userStats.following}</Text>
+          <Text style={styles.statLabel}>Siguiendo</Text>
         </TouchableOpacity>
-        <Text style={styles.name}>{user ? `${user.firstName || ''} ${user.lastName || ''}`.trim() : 'Usuario'}</Text>
-        <Text style={styles.username}>{user && user.username ? `@${user.username}` : (userId ? `@${userId.slice(0, 8)}` : '@usuario')}</Text>
-        <Text style={styles.bio}>{user?.publicMetadata?.bio || user?.bio || '¡Comparte tus mejores recetas!'}</Text>
-        <View style={styles.statsContainer}>
-          <TouchableOpacity style={styles.statBox} onPress={() => setActiveTab('My Recipes')} activeOpacity={0.7}>
-            <Text style={styles.statNumber}>{userRecipes.length > 0 ? userRecipes.length : userStats.recipes}</Text>
-            <Text style={styles.statLabel}>Recetas</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.statBox} onPress={handleFollowingPress} activeOpacity={0.7}>
-            <Text style={styles.statNumber}>{following.length > 0 ? following.length : userStats.following}</Text>
-            <Text style={styles.statLabel}>Siguiendo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.statBox} onPress={handleFollowersPress} activeOpacity={0.7}>
-            <Text style={styles.statNumber}>{followers.length > 0 ? followers.length : userStats.followers}</Text>
-            <Text style={styles.statLabel}>Seguidores</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.buttonsContainer}>
-          <TouchableOpacity style={[styles.actionButton, styles.orangeButton]} onPress={handleEditProfilePress}>
-            <Text style={styles.actionButtonText}>Editar Perfil</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShareModalVisible(true)}>
-            <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
-          </TouchableOpacity>
-        </View>
-        <View style={styles.tabsContainer}>
+        <TouchableOpacity style={styles.statBox} onPress={handleFollowersPress} activeOpacity={0.7}>
+          <Text style={styles.statNumber}>{followers.length > 0 ? followers.length : userStats.followers}</Text>
+          <Text style={styles.statLabel}>Seguidores</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.buttonsContainer}>
+        <TouchableOpacity style={[styles.actionButton, styles.orangeButton]} onPress={handleEditProfilePress}>
+          <Text style={styles.actionButtonText}>Editar Perfil</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, styles.shareButton]} onPress={() => setShareModalVisible(true)}>
+          <Text style={[styles.actionButtonText, { color: '#E2773C' }]}>Compartir Perfil</Text>
+        </TouchableOpacity>
+      </View>
+              <View style={styles.tabsContainer}>
           {['My Recipes', 'Favorites', 'Changed'].map(tab => (
-            <TouchableOpacity key={tab} onPress={() => setActiveTab(tab)} style={styles.tabButton}>
+            <TouchableOpacity 
+              key={tab} 
+              onPress={() => {
+                setActiveTab(tab);
+                // Refresh data when switching to Favorites tab
+                if (tab === 'Favorites') {
+                  console.log('Switching to Favorites tab, refreshing data...');
+                  fetchProfileData();
+                  loadChangedRecipes();
+                }
+              }} 
+              style={styles.tabButton}
+            >
               <Text style={[styles.tabText, activeTab === tab && styles.activeTab]}>{tab}</Text>
             </TouchableOpacity>
           ))}
         </View>
-      </>
-    );
-  };
+    </>
+  );
 
   // Renderizado de colecciones personalizadas en cards tipo carpeta (solo local, sin favoritos)
   const renderCustomCollections = () => {
+    const filteredCollections = userCollections.filter(col => col.name.toLowerCase() !== 'favoritos');
+    
+    if (filteredCollections.length === 0) {
+      return (
+        <View style={{ padding: 16, marginTop: 16 }}>
+          <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
+            Mis Colecciones
+          </Text>
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyStateText}>No tienes colecciones personalizadas</Text>
+            <Text style={styles.emptyStateSubtext}>
+              Crea colecciones para organizar tus recetas favoritas
+            </Text>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} 
+              onPress={() => setCreateModalVisible(true)}
+            >
+              <Text style={styles.actionButtonText}>Crear Colección</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     return (
-      <View>
-        <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#E2773C', marginTop: 28, marginBottom: 10, marginLeft: 4 }}>
+      <View style={{ padding: 16, marginTop: 16 }}>
+        <Text style={{ fontSize: 22, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
           Mis Colecciones
         </Text>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-          {userCollections
-            .filter(col => col.name.toLowerCase() !== 'favoritos')
-            .map(collection => (
-              <View
-                key={collection.id}
-                style={{
-                  width: '46%',
-                  margin: '2%',
-                  backgroundColor: '#f8f8f8',
-                  borderRadius: 18,
-                  padding: 14,
-                  alignItems: 'center',
-                  shadowColor: '#000',
-                  shadowOpacity: 0.13,
-                  shadowRadius: 10,
-                  elevation: 4,
-                  position: 'relative',
-                  borderWidth: 1.5,
-                  borderColor: '#e0e0e0',
-                }}
-              >
-                {/* Ícono de carpeta o personalizado */}
-                {(() => {
-                  const icon = getCollectionIcon(collection);
-                  if (icon.type === 'emoji') {
-                    return <Text style={{ fontSize: 38, marginBottom: 6 }}>{icon.value}</Text>;
-                  }
-                  return (
-                    <MaterialIcons
-                      name={icon.value}
-                      size={38}
-                      color={collection.color || '#E2773C'}
-                      style={{ marginBottom: 6 }}
-                    />
-                  );
-                })()}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-                  <Text style={{ fontWeight: 'bold', fontSize: 16, color: '#E2773C', marginBottom: 2, textAlign: 'center', flex: 1 }}>{collection.displayName || collection.name}</Text>
-                  {/* Botón ver (popup) */}
-                  <TouchableOpacity onPress={() => openCollectionModal(collection)} style={{ marginLeft: 6 }}>
-                    <Ionicons name="eye" size={22} color="#E2773C" />
-                  </TouchableOpacity>
-                </View>
-                <Text style={{ color: '#888', fontSize: 13, marginBottom: 6 }}>{collection.recipes.length} receta{collection.recipes.length === 1 ? '' : 's'}</Text>
-                {/* Botón eliminar */}
-                <TouchableOpacity
-                  style={{ position: 'absolute', top: 8, right: 8, zIndex: 2 }}
-                  onPress={(e) => {
-                    e.stopPropagation && e.stopPropagation();
-                    handleDeleteCollection(collection.id);
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+          {filteredCollections.map(collection => (
+            <View
+              key={collection.id}
+              style={{
+                width: '48%',
+                marginBottom: 16,
+                backgroundColor: '#f8f8f8',
+                borderRadius: 16,
+                padding: 16,
+                alignItems: 'center',
+                shadowColor: '#000',
+                shadowOpacity: 0.08,
+                shadowRadius: 8,
+                elevation: 3,
+                borderWidth: 1,
+                borderColor: '#e0e0e0',
+              }}
+            >
+              {/* Ícono de carpeta o personalizado */}
+              {(() => {
+                const icon = getCollectionIcon(collection);
+                if (icon.type === 'emoji') {
+                  return <Text style={{ fontSize: 36, marginBottom: 8 }}>{icon.value}</Text>;
+                }
+                return (
+                  <MaterialIcons
+                    name={icon.value}
+                    size={36}
+                    color={collection.color || '#E2773C'}
+                    style={{ marginBottom: 8 }}
+                  />
+                );
+              })()}
+              
+              <Text style={{ 
+                fontWeight: 'bold', 
+                fontSize: 14, 
+                color: '#E2773C', 
+                marginBottom: 4, 
+                textAlign: 'center',
+                lineHeight: 18
+              }}>
+                {collection.displayName || collection.name}
+              </Text>
+              
+              <Text style={{ color: '#888', fontSize: 12, marginBottom: 8 }}>
+                {collection.recipes?.length || 0} receta{(collection.recipes?.length || 0) === 1 ? '' : 's'}
+              </Text>
+              
+              {/* Botones de acción */}
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity 
+                  onPress={() => openCollectionModal(collection)}
+                  style={{ 
+                    backgroundColor: '#E2773C', 
+                    paddingHorizontal: 12, 
+                    paddingVertical: 6, 
+                    borderRadius: 12 
                   }}
                 >
-                  <MaterialIcons name="delete" size={22} color="#E2773C" />
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Ver</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={() => handleDeleteCollection(collection.id)}
+                  style={{ 
+                    backgroundColor: '#ff4444', 
+                    paddingHorizontal: 12, 
+                    paddingVertical: 6, 
+                    borderRadius: 12 
+                  }}
+                >
+                  <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>Eliminar</Text>
                 </TouchableOpacity>
               </View>
-            ))}
+            </View>
+          ))}
+          
           {/* Botón para crear nueva colección */}
-          <TouchableOpacity onPress={() => setCreateModalVisible(true)} style={{ width: '46%', margin: '2%', backgroundColor: '#fff7f2', borderRadius: 18, padding: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#E2773C', borderStyle: 'dashed' }}>
-            <MaterialIcons name="add" size={38} color="#E2773C" />
-            <Text style={{ color: '#E2773C', fontWeight: 'bold', fontSize: 16, marginTop: 6 }}>Nueva colección</Text>
+          <TouchableOpacity 
+            onPress={() => setCreateModalVisible(true)} 
+            style={{ 
+              width: '48%', 
+              marginBottom: 16,
+              backgroundColor: '#fff7f2', 
+              borderRadius: 16, 
+              padding: 16, 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              borderWidth: 2, 
+              borderColor: '#E2773C', 
+              borderStyle: 'dashed',
+              minHeight: 120
+            }}
+          >
+            <MaterialIcons name="add" size={32} color="#E2773C" />
+            <Text style={{ color: '#E2773C', fontWeight: 'bold', fontSize: 14, marginTop: 8, textAlign: 'center' }}>
+              Nueva colección
+            </Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -661,84 +739,20 @@ export default function ProfileScreen() {
         <>
           {renderProfileHeader()}
           {activeTab === 'My Recipes' ? (
-            <>
-              <FlatList
-                data={userRecipes}
-                keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
-                numColumns={2}
-                renderItem={({ item }) => (
-                  <View style={styles.recipeCard}>
-                    <RecipeCard
-                      recipe={{
-                        ...item,
-                        title: item.title || 'Sin título',
-                        description: item.description || 'Sin descripción',
-                        estimatedTime: item.estimatedTime || item.duration || 30,
-                      }}
-                      onPress={() => router.push({
-                        pathname: '/(tabs)/recipe',
-                        params: { post: JSON.stringify(item), from: 'profile' }
-                      })}
-                      isOwner={true}
-                      onEdit={() => {
-                        router.push({ pathname: '/edit-recipe', params: { recipeData: JSON.stringify(item) } });
-                      }}
-                      onDelete={() => handleDeleteRecipe(item)}
-                      editDisabled={item.status !== 'approved'}
-                    />
-                  </View>
-                )}
-                contentContainerStyle={styles.recipesGrid}
-                showsVerticalScrollIndicator={false}
-                ListEmptyComponent={
-                  <View style={styles.emptyState}>
-                    <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
-                    <Text style={styles.emptyStateSubtext}>
-                      ¡Crea tu primera receta y compártela!
-                    </Text>
-                    <TouchableOpacity style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} onPress={() => router.push('/(tabs)/create-recipe')}>
-                      <Text style={styles.actionButtonText}>Crear Receta</Text>
-                    </TouchableOpacity>
-                  </View>
-                }
-              />
-              {/* Render tolerante de seguidores y seguidos */}
-              <View style={{ marginTop: 16 }}>
-                <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16 }}>Seguidores ({followers.length})</Text>
-                {Array.isArray(followers) && followers.length > 0 ? (
-                  followers.map((f, idx) => (
-                    <View key={f.id || idx} style={{ borderBottomWidth: 1, borderColor: '#eee', paddingVertical: 4 }}>
-                      <Text style={{ color: '#222' }}>{f.user?.username || f.user?.id || f.id || JSON.stringify(f)}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={{ color: '#888' }}>Sin seguidores</Text>
-                )}
-                <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16, marginTop: 8 }}>Siguiendo ({following.length})</Text>
-                {Array.isArray(following) && following.length > 0 ? (
-                  following.map((f, idx) => (
-                    <View key={f.id || idx} style={{ borderBottomWidth: 1, borderColor: '#eee', paddingVertical: 4 }}>
-                      <Text style={{ color: '#222' }}>{f.user?.username || f.user?.id || f.id || JSON.stringify(f)}</Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={{ color: '#888' }}>No sigues a nadie</Text>
-                )}
-              </View>
-            </>
-          ) : activeTab === 'Favorites' ? (
-            <View style={{ flex: 1 }}>
-              <View style={{ padding: 12, paddingBottom: 80 }}>
-                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 12, marginLeft: 4 }}>
-                  Favoritos
+            <ScrollView 
+              style={{ flex: 1 }} 
+              contentContainerStyle={{ paddingBottom: 100 }}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={{ padding: 16 }}>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
+                  Mis Recetas
                 </Text>
-                <View style={{ marginBottom: 24 }}>
-                  <FlatList
-                    data={favoriteRecipes}
-                    keyExtractor={(item, idx) => (item && item.id ? item.id.toString() : idx.toString())}
-                    numColumns={2}
-                    renderItem={({ item }) => (
-                      <View style={styles.recipeCard}>
+                
+                {userRecipes.length > 0 ? (
+                  <View style={styles.recipesGrid}>
+                    {userRecipes.map((item, idx) => (
+                      <View key={item?.id || idx} style={styles.recipeCard}>
                         <RecipeCard
                           recipe={{
                             ...item,
@@ -748,76 +762,176 @@ export default function ProfileScreen() {
                           }}
                           onPress={() => router.push({
                             pathname: '/(tabs)/recipe',
-                            params: { post: JSON.stringify(item), from: 'profile' }
+                            params: { post: JSON.stringify(item) }
+                          })}
+                          isOwner={true}
+                          onEdit={() => {
+                            router.push({ pathname: '/edit-recipe', params: { recipeData: JSON.stringify(item) } });
+                          }}
+                          onDelete={() => handleDeleteRecipe(item)}
+                          editDisabled={item.status !== 'approved'}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>Aún no tienes recetas</Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      ¡Crea tu primera receta y compártela!
+                    </Text>
+                    <TouchableOpacity 
+                      style={[styles.actionButton, styles.orangeButton, { marginTop: 16 }]} 
+                      onPress={() => router.push('/(tabs)/create-recipe')}
+                    >
+                      <Text style={styles.actionButtonText}>Crear Receta</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
+
+              {/* Sección de Seguidores/Siguiendo */}
+              <View style={{ padding: 16, marginTop: 16 }}>
+                <Text style={{ fontSize: 20, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
+                  Comunidad
+                </Text>
+                
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16, marginBottom: 8 }}>
+                    Seguidores ({followers.length})
+                  </Text>
+                  {Array.isArray(followers) && followers.length > 0 ? (
+                    followers.map((f, idx) => (
+                      <View key={f.id || idx} style={{ 
+                        borderBottomWidth: 1, 
+                        borderColor: '#eee', 
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        backgroundColor: '#f8f8f8',
+                        borderRadius: 8,
+                        marginBottom: 4
+                      }}>
+                        <Text style={{ color: '#222', fontWeight: '500' }}>
+                          {f.user?.username || f.user?.id || f.id || 'Usuario'}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ color: '#888', fontStyle: 'italic' }}>Sin seguidores</Text>
+                  )}
+                </View>
+
+                <View>
+                  <Text style={{ fontWeight: 'bold', color: '#E2773C', fontSize: 16, marginBottom: 8 }}>
+                    Siguiendo ({following.length})
+                  </Text>
+                  {Array.isArray(following) && following.length > 0 ? (
+                    following.map((f, idx) => (
+                      <View key={f.id || idx} style={{ 
+                        borderBottomWidth: 1, 
+                        borderColor: '#eee', 
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        backgroundColor: '#f8f8f8',
+                        borderRadius: 8,
+                        marginBottom: 4
+                      }}>
+                        <Text style={{ color: '#222', fontWeight: '500' }}>
+                          {f.user?.username || f.user?.id || f.id || 'Usuario'}
+                        </Text>
+                      </View>
+                    ))
+                  ) : (
+                    <Text style={{ color: '#888', fontStyle: 'italic' }}>No sigues a nadie</Text>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+          ) : activeTab === 'Favorites' ? (
+            <ScrollView 
+              style={{ flex: 1 }} 
+              contentContainerStyle={{ paddingBottom: 100 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Sección de Favoritos */}
+              <View style={{ padding: 16 }}>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
+                  Favoritos
+                </Text>
+                
+                {favoriteRecipes.length > 0 ? (
+                  <View style={styles.recipesGrid}>
+                    {favoriteRecipes.map((item, idx) => (
+                      <View key={item?.id || idx} style={styles.recipeCard}>
+                        <RecipeCard
+                          recipe={{
+                            ...item,
+                            title: item.title || 'Sin título',
+                            description: item.description || 'Sin descripción',
+                            estimatedTime: item.estimatedTime || item.duration || 30,
+                          }}
+                          onPress={() => router.push({
+                            pathname: '/(tabs)/recipe',
+                            params: { post: JSON.stringify(item) }
                           })}
                         />
                       </View>
-                    )}
-                    contentContainerStyle={styles.recipesGrid}
-                    showsVerticalScrollIndicator={false}
-                    ListEmptyComponent={<Text style={{ color: '#888' }}>No tienes recetas favoritas.</Text>}
-                  />
-                  {/* Si userStats dice que hay favoritos pero el array está vacío, mostrar el array en texto para depuración */}
-                  {userStats.favorites > 0 && favoriteRecipes.length === 0 && (
-                    <Text style={{ color: 'red', fontSize: 12 }}>favoriteRecipes vacío pero userStats.favorites = {userStats.favorites}. Datos: {JSON.stringify(favoriteRecipes)}</Text>
-                  )}
-                </View>
-                {/* Render colecciones personalizadas (solo local) */}
-                {renderCustomCollections()}
-                
-                {/* Botón de debug temporal */}
-                <TouchableOpacity 
-                  style={{ 
-                    backgroundColor: '#E2773C', 
-                    padding: 12, 
-                    borderRadius: 8, 
-                    marginTop: 20,
-                    alignItems: 'center'
-                  }}
-                  onPress={async () => {
-                    console.log('DEBUG: Testing local collections...');
-                    const localCollections = await getCustomCollections(userId);
-                    console.log('DEBUG: Current local collections:', localCollections);
-                    setUserCollections(localCollections);
-                  }}
-                >
-                  <Text style={{ color: '#fff', fontWeight: 'bold' }}>
-                    Debug: Recargar Colecciones Locales
-                  </Text>
-                </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>No tienes recetas favoritas</Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      Las recetas que marques como favoritas aparecerán aquí
+                    </Text>
+                  </View>
+                )}
               </View>
-            </View>
+
+              {/* Sección de Colecciones */}
+              {renderCustomCollections()}
+            </ScrollView>
           ) : activeTab === 'Changed' ? (
-            <FlatList
-              data={changedRecipes}
-              keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
-              numColumns={2}
-              renderItem={({ item }) => (
-                <View style={styles.recipeCard}>
-                  <RecipeCard
-                    recipe={{
-                      ...item,
-                      title: item.title || 'Sin título',
-                      description: item.description || 'Sin descripción',
-                      averageRating: item.averageRating || item.rating || 4.2,
-                      estimatedTime: item.estimatedTime || item.duration || 30,
-                    }}
-                    onPress={() => router.push({
-                      pathname: '/(tabs)/recipe',
-                      params: { post: JSON.stringify(item), from: 'profile' }
-                    })}
-                  />
-                </View>
-              )}
-              contentContainerStyle={styles.recipesGrid}
+            <ScrollView 
+              style={{ flex: 1 }} 
+              contentContainerStyle={{ paddingBottom: 100 }}
               showsVerticalScrollIndicator={false}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>Aún no tienes recetas modificadas</Text>
-                  <Text style={styles.emptyStateSubtext}>Modifica una receta para que aparezca aquí</Text>
-                </View>
-              }
-            />
+            >
+              <View style={{ padding: 16 }}>
+                <Text style={{ fontSize: 24, fontWeight: 'bold', color: '#E2773C', marginBottom: 16 }}>
+                  Recetas Modificadas
+                </Text>
+                
+                {changedRecipes.length > 0 ? (
+                  <View style={styles.recipesGrid}>
+                    {changedRecipes.map((item, idx) => (
+                      <View key={item?.id || idx} style={styles.recipeCard}>
+                        <RecipeCard
+                          recipe={{
+                            ...item,
+                            title: item.title || 'Sin título',
+                            description: item.description || 'Sin descripción',
+                            averageRating: item.averageRating || item.rating || 4.2,
+                            estimatedTime: item.estimatedTime || item.duration || 30,
+                          }}
+                          onPress={() => router.push({
+                            pathname: '/(tabs)/recipe',
+                            params: { post: JSON.stringify(item) }
+                          })}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyStateText}>Aún no tienes recetas modificadas</Text>
+                    <Text style={styles.emptyStateSubtext}>
+                      Modifica una receta para que aparezca aquí
+                    </Text>
+                  </View>
+                )}
+              </View>
+            </ScrollView>
           ) : (
             // Para otras tabs, puedes usar un ScrollView si lo necesitas
             <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
@@ -865,16 +979,21 @@ export default function ProfileScreen() {
             {selectedCollectionRecipes.length === 0 ? (
               <Text style={styles.emptyStateText}>No hay recetas en esta colección</Text>
             ) : (
-              <View style={{ maxHeight: 400, minWidth: 260, width: 320, alignSelf: 'center' }}>
-                {selectedCollectionRecipes.map((item, idx) => (
-                  <View key={item.id?.toString() || idx.toString()} style={{ marginBottom: 18, alignItems: 'center', width: '100%' }}>
+              <FlatList
+                data={selectedCollectionRecipes}
+                keyExtractor={(item, idx) => item.id?.toString() || idx.toString()}
+                renderItem={({ item }) => (
+                  <View style={{ marginBottom: 18, alignItems: 'center', width: '100%' }}>
                     <RecipeCard
                       recipe={item}
                       onPress={() => router.push(`/recipe/${item.id}`)}
                     />
                   </View>
-                ))}
-              </View>
+                )}
+                contentContainerStyle={{ paddingBottom: 8, paddingTop: 8, alignItems: 'center' }}
+                showsVerticalScrollIndicator={false}
+                style={{ maxHeight: 400, minWidth: 260, width: 320, alignSelf: 'center' }}
+              />
             )}
           </View>
         </View>
@@ -889,9 +1008,9 @@ export default function ProfileScreen() {
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center' }}>
           <View style={{ backgroundColor: '#fff', borderRadius: 16, padding: 24, width: 300, alignItems: 'center' }}>
             <Ionicons name="trash" size={40} color="#ef4444" style={{ marginBottom: 12 }} />
-            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>¿Desea eliminar?</Text>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 8 }}>¿Eliminar receta?</Text>
             <Text style={{ color: '#666', marginBottom: 20, textAlign: 'center' }}>
-              Esta acción enviará una solicitud al administrador para eliminar la receta &quot;{recipeToDelete?.title}&quot;. ¿Desea continuar?
+              Esta acción eliminará permanentemente la receta &quot;{recipeToDelete?.title}&quot;. Esta acción no se puede deshacer. ¿Desea continuar?
             </Text>
             <View style={{ flexDirection: 'row', gap: 16 }}>
               <TouchableOpacity onPress={() => setDeleteModalVisible(false)} style={{ padding: 10, borderRadius: 8, backgroundColor: '#e0e0e0', marginRight: 8 }}>
@@ -899,6 +1018,83 @@ export default function ProfileScreen() {
               </TouchableOpacity>
               <TouchableOpacity onPress={confirmDeleteRecipe} style={{ padding: 10, borderRadius: 8, backgroundColor: '#ef4444' }}>
                 <Text style={{ color: '#fff' }}>Eliminar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal para crear nueva colección */}
+      <Modal
+        visible={createModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCreateModalVisible(false)}
+      >
+        <View style={styles.collectionModalOverlay}>
+          <View style={styles.collectionModal}>
+            <Text style={styles.collectionModalTitle}>Crear Nueva Colección</Text>
+            
+            <View style={{ width: '100%', marginBottom: 16 }}>
+              <Text style={{ fontSize: 14, color: '#666', marginBottom: 8 }}>Nombre de la colección</Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 16,
+                  backgroundColor: '#fff'
+                }}
+                placeholder="Ej: Recetas dulces"
+                value={newCollectionName}
+                onChangeText={setNewCollectionName}
+                autoFocus
+              />
+            </View>
+
+            <View style={{ width: '100%', marginBottom: 24 }}>
+              <Text style={{ fontSize: 14, color: '#666', marginBottom: 8 }}>Ícono</Text>
+              <TextInput
+                style={{
+                  borderWidth: 1,
+                  borderColor: '#ddd',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 16,
+                  backgroundColor: '#fff'
+                }}
+                placeholder="folder"
+                value={newCollectionIcon}
+                onChangeText={setNewCollectionIcon}
+              />
+            </View>
+
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity 
+                onPress={() => setCreateModalVisible(false)}
+                style={{ 
+                  paddingHorizontal: 20, 
+                  paddingVertical: 12, 
+                  borderRadius: 8, 
+                  backgroundColor: '#e0e0e0',
+                  flex: 1
+                }}
+              >
+                <Text style={{ color: '#333', textAlign: 'center', fontWeight: 'bold' }}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                onPress={handleCreateCollection}
+                style={{ 
+                  paddingHorizontal: 20, 
+                  paddingVertical: 12, 
+                  borderRadius: 8, 
+                  backgroundColor: '#E2773C',
+                  flex: 1
+                }}
+              >
+                <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>Crear</Text>
               </TouchableOpacity>
             </View>
           </View>
